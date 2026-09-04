@@ -3,6 +3,7 @@
 from http.server import BaseHTTPRequestHandler
 
 import server
+import re
 
 
 # Vercel statically detects Python Functions from an explicit handler class.
@@ -16,21 +17,28 @@ except Exception as error:  # Keep /api/health available for safe diagnostics.
     print(f"Krasunya database initialization failed: {_initialization_error}")
 
 
+def _initialization_error_detail():
+    """Return a short diagnostic without exposing connection credentials."""
+    detail = (_initialization_error or "Неизвестная ошибка инициализации базы").splitlines()[0].strip()
+    detail = re.sub(r"postgres(?:ql)?://\S+", "postgres://[redacted]", detail)
+    return detail[:160]
+
+
 class handler(BaseHTTPRequestHandler):
     """Expose the shared backend methods through Vercel's Python runtime."""
 
     def do_GET(self):
-        if _initialization_error and self.path.split("?", 1)[0] == "/api/health":
-            body = server.json.dumps({"ok": False, "error": _initialization_error}, ensure_ascii=False).encode("utf-8")
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+        if _initialization_error:
+            self.send_json(500, {"error": "Внутрішня помилка сервера.", "details": [f"Діагностика: {_initialization_error_detail()}"]})
             return
         return server.Handler.do_GET(self)
 
-    do_POST = server.Handler.do_POST
+    def do_POST(self):
+        if _initialization_error:
+            self.send_json(500, {"error": "Внутрішня помилка сервера.", "details": [f"Діагностика: {_initialization_error_detail()}"]})
+            return
+        return server.Handler.do_POST(self)
+
     do_PATCH = server.Handler.do_PATCH
     do_PUT = server.Handler.do_PUT
     do_DELETE = server.Handler.do_DELETE

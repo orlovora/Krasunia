@@ -1,0 +1,6 @@
+krasunya.sqlite3
+__pycache__/
+.DS_Store
+.deck-build/
+.deck-output/
+.codex-finalizer/

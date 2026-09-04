@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2e1c2d" />
+    <title>Красуня — розумний запис салону</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Перейти до основного вмісту</a>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Основна навігація">
+        <div class="brand-lockup">
+          <div class="brand-logo-frame"><img src="assets/krasunya-logo-cropped.png" alt="Красуня" /></div>
+          <div class="brand-caption">простір салону</div>
+        </div>
+
+        <button class="branch-switcher" id="branch-switcher" data-action="open-branch-switcher" type="button" aria-label="Обрати філію">
+          <div class="branch-avatar">01</div>
+          <div class="branch-copy">
+            <span class="muted-label">Філія</span>
+            <strong id="branch-name">Поділ</strong>
+            <span id="branch-city">Київ</span>
+          </div>
+          <span class="chevron" aria-hidden="true">⌄</span>
+        </button>
+
+        <nav class="nav-stack" aria-label="Розділи">
+          <div class="nav-label">Робочий стіл</div>
+          <button class="nav-item active" data-section="schedule" type="button">
+            <span class="nav-icon" aria-hidden="true">▦</span><span>Розклад</span><span class="nav-count">5</span>
+          </button>
+          <button class="nav-item" data-section="clients" type="button">
+            <span class="nav-icon" aria-hidden="true">♧</span><span>Клієнти</span>
+          </button>
+          <button class="nav-item" data-section="history" type="button">
+            <span class="nav-icon" aria-hidden="true">↻</span><span>Історія візитів</span>
+          </button>
+
+          <div class="nav-label nav-label-spaced">Налаштування</div>
+          <button class="nav-item" data-section="procedures" type="button">
+            <span class="nav-icon" aria-hidden="true">✦</span><span>Процедури</span>
+          </button>
+          <button class="nav-item" data-section="resources" type="button">
+            <span class="nav-icon" aria-hidden="true">⌘</span><span>Кабінети й обладнання</span>
+          </button>
+          <button class="nav-item" data-section="team" type="button">
+            <span class="nav-icon" aria-hidden="true">◌</span><span>Команда</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="setup-card">
+            <div class="setup-orbit" aria-hidden="true"><span>↗</span></div>
+            <div class="setup-copy">
+              <strong>Синхронізація</strong>
+              <span>Усі ресурси вільні</span>
+            </div>
+            <span class="online-dot" aria-label="Синхронізовано"></span>
+          </div>
+          <button class="account-row" id="account-row" data-action="open-settings" type="button" aria-label="Відкрити налаштування користувача">
+            <div class="avatar avatar-olga" id="account-avatar">ОК</div>
+            <div class="account-copy"><strong id="account-name">Ольга Коваль</strong><span id="account-role">Адміністратор</span></div>
+            <span class="icon-button sidebar-more" aria-hidden="true">•••</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main-area" id="main-content">
+        <header class="topbar">
+          <div class="breadcrumb"><span>Красуня</span><span class="breadcrumb-slash">/</span><strong id="breadcrumb-current">Розклад</strong></div>
+          <div class="topbar-actions">
+            <label class="search-box">
+              <span class="search-icon" aria-hidden="true">⌕</span>
+              <input id="global-search" type="search" placeholder="Пошук клієнта або запису" aria-label="Пошук клієнта або запису" />
+              <kbd>⌘ K</kbd>
+            </label>
+            <button class="icon-button notification-button" type="button" aria-label="Сповіщення" title="Сповіщення"><span class="notification-dot"></span><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" /></svg></button>
+            <div class="session-chip" id="session-chip" aria-label="Поточний користувач">
+              <span class="session-chip-dot" aria-hidden="true"></span>
+              <span id="session-label">Сеанс активний</span>
+            </div>
+          </div>
+        </header>
+
+        <div class="content-wrap">
+          <section class="page-intro" aria-labelledby="page-title">
+            <div>
+              <div class="eyebrow" id="date-eyebrow">ПТ, 04 ВЕРЕСНЯ 2026</div>
+              <h1 id="page-title">Доброго ранку, Ольго <span class="wave">✳</span></h1>
+              <p id="page-subtitle">У студії спокійний ритм — 5 записів сьогодні, 2 потребують вашої уваги.</p>
+            </div>
+            <button class="primary-button" id="new-booking-button" type="button"><span aria-hidden="true">＋</span> Новий запис</button>
+          </section>
+
+          <div class="stats-grid" id="stats-grid" aria-label="Показники дня"></div>
+
+          <div id="app-view" class="app-view"></div>
+        </div>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="modal-backdrop" hidden>
+      <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"></div>
+    </div>
+    <div class="auth-backdrop" id="auth-backdrop" hidden>
+      <section class="auth-modal" id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title"></section>
+    </div>
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

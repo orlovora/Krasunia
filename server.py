@@ -783,8 +783,8 @@ class Handler(SimpleHTTPRequestHandler):
 def main() -> None:
     init_db()
     port = int(os.environ.get("PORT", "4173"))
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"Красуня backend: http://127.0.0.1:{port}")
+    server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    print(f"Красуня backend: http://0.0.0.0:{port}")
     print(f"SQLite: {DB_PATH}")
     try:
         server.serve_forever()

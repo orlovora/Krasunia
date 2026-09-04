@@ -5,7 +5,7 @@
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "functions": {
-    "api/index.py": {
+    "api/*.py": {
       "maxDuration": 10
     }
   }

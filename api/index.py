@@ -8,13 +8,28 @@ import server
 # Vercel statically detects Python Functions from an explicit handler class.
 # The actual route implementation stays in server.py so local and hosted
 # requests share the same validation and persistence code.
-server.init_db()
+_initialization_error = None
+try:
+    server.init_db()
+except Exception as error:  # Keep /api/health available for safe diagnostics.
+    _initialization_error = f"{type(error).__name__}: {error}"
+    print(f"Krasunya database initialization failed: {_initialization_error}")
 
 
 class handler(BaseHTTPRequestHandler):
     """Expose the shared backend methods through Vercel's Python runtime."""
 
-    do_GET = server.Handler.do_GET
+    def do_GET(self):
+        if _initialization_error and self.path.split("?", 1)[0] == "/api/health":
+            body = server.json.dumps({"ok": False, "error": _initialization_error}, ensure_ascii=False).encode("utf-8")
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        return server.Handler.do_GET(self)
+
     do_POST = server.Handler.do_POST
     do_PATCH = server.Handler.do_PATCH
     do_PUT = server.Handler.do_PUT

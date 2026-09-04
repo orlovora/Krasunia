@@ -166,7 +166,7 @@ async function loadPersistentState() {
     }
     applySessionUser(session.user);
     const payload = await apiRequest("/bootstrap");
-    ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots"].forEach((key) => {
+    ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots", "branches"].forEach((key) => {
       if (Array.isArray(payload[key])) state[key] = payload[key];
     });
     apiReady = true;
@@ -245,6 +245,125 @@ function formatDateEyebrow(isoDate) {
 
 function formatMoney(value) {
   return new Intl.NumberFormat("ru-RU").format(value).replaceAll(" ", " ") + " ₴";
+}
+
+function roleLabel(role) {
+  return { admin: "Адміністратор", master: "Майстер", client: "Клієнт" }[role] || "Користувач";
+}
+
+function getCurrentBranch() {
+  return state.branches.find((branch) => branch.id === state.branchId) || state.branches[0] || { id: "", name: "Філія", city: "" };
+}
+
+function renderLoginScreen(errorMessage = "") {
+  const users = demoUsers[authRoleDraft] || demoUsers.admin;
+  const userOptions = users.map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name)}</option>`).join("");
+  const branchField = authRoleDraft === "master"
+    ? `<div class="auth-field"><label>Філія майстра</label><div class="settings-detail" style="margin-top:0;padding:11px 12px;background:var(--cream);border-radius:10px;border:0"><span>Основна локація</span><strong>Поділ · Київ</strong></div></div>`
+    : `<div class="auth-field"><label for="login-branch">Філія для роботи</label><select id="login-branch" name="branchId" required>${state.branches.map((branch) => `<option value="${escapeHtml(branch.id)}" ${branch.id === state.branchId ? "selected" : ""}>${escapeHtml(branch.name)} · ${escapeHtml(branch.city)}</option>`).join("")}</select></div>`;
+  const roles = ["admin", "master", "client"];
+  $("#auth-modal").innerHTML = `
+    <div class="auth-brand"><div class="auth-brand-mark">К</div><div class="auth-brand-copy"><strong>Красуня</strong><span>простір салону</span></div></div>
+    <h1 id="auth-title">Вхід у систему</h1>
+    <p>Оберіть свою роль, щоб відкрити персональний робочий простір.</p>
+    <div class="auth-role-tabs" role="tablist" aria-label="Тип користувача">
+      ${roles.map((role) => `<button class="auth-role-tab ${authRoleDraft === role ? "active" : ""}" data-auth-role="${role}" type="button" role="tab" aria-selected="${authRoleDraft === role}">${roleLabel(role)}</button>`).join("")}
+    </div>
+    <form class="auth-form" id="login-form">
+      <div class="auth-field"><label for="login-user">Користувач</label><select id="login-user" name="userId" required>${userOptions}</select></div>
+      ${branchField}
+      <div class="auth-field"><label for="login-password">Пароль</label><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Введіть пароль" required /></div>
+      <p class="auth-password-note">Для локального демо використовуйте пароль <strong>demo123</strong>.</p>
+      ${errorMessage ? `<div class="auth-error" role="alert">${escapeHtml(errorMessage)}</div>` : ""}
+      <button class="primary-button auth-submit" type="submit">Увійти в Красуня <span>→</span></button>
+    </form>
+    <p class="auth-footer">Доступ до розкладу, клієнтів і ресурсів залежить від вашої ролі.</p>
+  `;
+  $("#auth-backdrop").hidden = false;
+  setTimeout(() => $("#login-user")?.focus(), 0);
+}
+
+function closeAuthScreen() {
+  $("#auth-backdrop").hidden = true;
+}
+
+async function loginFromForm(form) {
+  const data = new FormData(form);
+  const payload = { role: authRoleDraft, userId: data.get("userId"), password: data.get("password"), branchId: data.get("branchId") || "branch-podil" };
+  try {
+    if (apiAvailable) {
+      const response = await apiRequest("/auth/login", { method: "POST", body: JSON.stringify(payload) });
+      if (Array.isArray(response.branches)) state.branches = response.branches;
+      applySessionUser(response.user);
+      const bootstrap = await apiRequest("/bootstrap");
+      ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots", "branches"].forEach((key) => {
+        if (Array.isArray(bootstrap[key])) state[key] = bootstrap[key];
+      });
+      if (bootstrap.session) applySessionUser(bootstrap.session);
+      apiReady = true;
+    } else {
+      const user = (demoUsers[authRoleDraft] || []).find((item) => item.id === payload.userId);
+      if (payload.password !== "demo123" || !user) throw { error: "Невірний користувач або пароль." };
+      applySessionUser({ ...user, branchId: authRoleDraft === "master" ? "branch-podil" : payload.branchId, masterName: authRoleDraft === "master" ? "Ірина Мельник" : "", clientId: authRoleDraft === "client" ? "client-001" : "" });
+    }
+    closeAuthScreen();
+    render();
+    showToast(`Вітаємо, ${state.user.name.split(" ")[0]}!`);
+  } catch (error) {
+    renderLoginScreen(apiErrorMessage(error));
+  }
+}
+
+function openBranchSwitcher() {
+  if (!state.authenticated || !["admin", "client"].includes(state.role)) return;
+  const currentBranch = getCurrentBranch();
+  $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Локація роботи</div><h2 id="modal-title">Оберіть філію</h2><p>${state.role === "admin" ? "Адміністратор може перемикати робочі локації та додавати нові." : "Оберіть салон, до якого хочете записатися."}</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><div class="modal-form"><div class="branch-list">${state.branches.map((branch, index) => `<button class="branch-option ${branch.id === currentBranch.id ? "active" : ""}" data-branch-select="${escapeHtml(branch.id)}" type="button"><span class="branch-option-mark">${String(index + 1).padStart(2, "0")}</span><span class="branch-option-copy"><strong>${escapeHtml(branch.name)} · ${escapeHtml(branch.city)}</strong><span>${escapeHtml(branch.address)} · ${escapeHtml(branch.phone || "Контакти не вказані")}</span></span>${branch.id === currentBranch.id ? `<span class="branch-current">Обрано</span>` : ""}</button>`).join("")}</div>${state.role === "admin" ? `<div class="branch-create"><div class="branch-create-head"><strong>Додати нову філію</strong><span class="tag">для адміністратора</span></div><form id="branch-create-form" class="form-grid"><div class="form-field"><label for="branch-create-name">Назва</label><input id="branch-create-name" name="name" placeholder="Наприклад, Центр" required /></div><div class="form-field"><label for="branch-create-city">Місто</label><input id="branch-create-city" name="city" placeholder="Київ" required /></div><div class="form-field full"><label for="branch-create-address">Адреса</label><input id="branch-create-address" name="address" placeholder="вул. ..." required /></div><div class="form-field"><label for="branch-create-phone">Телефон</label><input id="branch-create-phone" name="phone" placeholder="+38 ..." /></div><div class="form-field"><label for="branch-create-hours">Години</label><input id="branch-create-hours" name="hours" value="09:00–19:00" placeholder="09:00–19:00" /></div><div class="modal-actions full"><button class="primary-button" type="submit"><span>＋</span> Створити філію</button></div></form></div>` : ""}</div>`;
+  showModal();
+}
+
+async function switchBranch(branchId) {
+  const branch = state.branches.find((item) => item.id === branchId);
+  if (!branch) return;
+  try {
+    if (apiReady) {
+      const response = await apiRequest("/auth/branch", { method: "POST", body: JSON.stringify({ branchId }) });
+      applySessionUser({ ...state.user, ...response.user });
+      const bootstrap = await apiRequest("/bootstrap");
+      ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots", "branches"].forEach((key) => {
+        if (Array.isArray(bootstrap[key])) state[key] = bootstrap[key];
+      });
+      if (bootstrap.session) applySessionUser(bootstrap.session);
+    } else {
+      state.branchId = branchId;
+      if (state.user) state.user.branchId = branchId;
+    }
+    closeModal();
+    render();
+    showToast(`Філію змінено: ${branch.name}, ${branch.city}.`);
+  } catch (error) {
+    showToast(`Не вдалося змінити філію: ${apiErrorMessage(error)}`);
+  }
+}
+
+async function logoutFromSystem() {
+  try {
+    if (apiReady) await apiRequest("/auth/logout", { method: "POST" });
+  } catch (error) {
+    console.warn("Не вдалося завершити серверний сеанс.", error);
+  }
+  apiReady = false;
+  state.authenticated = false;
+  state.user = null;
+  state.role = "admin";
+  state.section = "schedule";
+  closeModal();
+  render();
+}
+
+function renderUserSettings() {
+  const user = state.user || { name: "Користувач", email: "", phone: "", role: state.role, initials: "К" };
+  const branch = getCurrentBranch();
+  return `<section class="settings-view"><section class="settings-card"><div class="panel-kicker">Особистий профіль</div><h2>Налаштування користувача</h2><p>Оновіть контактні дані та перевірте поточний доступ до системи.</p><form class="settings-form" id="profile-form"><div class="form-grid"><div class="form-field"><label for="profile-name">Ім'я та прізвище</label><input id="profile-name" name="name" value="${escapeHtml(user.name)}" required /></div><div class="form-field"><label for="profile-phone">Телефон</label><input id="profile-phone" name="phone" value="${escapeHtml(user.phone || "")}" /></div><div class="form-field"><label for="profile-email">Email</label><input id="profile-email" value="${escapeHtml(user.email || "")}" readonly /></div><div class="form-field"><label for="profile-role">Роль у системі</label><input id="profile-role" value="${roleLabel(user.role)}" readonly /></div></div><div class="modal-actions"><button class="primary-button" type="submit">Зберегти зміни</button></div></form></section><aside class="settings-card"><div class="settings-summary"><div class="avatar avatar-${user.role === "master" ? "lilac" : user.role === "client" ? "sage" : "peach"}">${escapeHtml(user.initials || user.name.split(" ").map((part) => part[0]).join("").slice(0, 2))}</div><div class="settings-summary-copy"><strong>${escapeHtml(user.name)}</strong><span>${escapeHtml(roleLabel(user.role))}</span></div></div><div class="settings-detail-list"><div class="settings-detail"><span>Поточна філія</span><strong>${escapeHtml(branch.name)} · ${escapeHtml(branch.city)}</strong></div><div class="settings-detail"><span>Адреса</span><strong>${escapeHtml(branch.address || "Не вказано")}</strong></div><div class="settings-detail"><span>Статус сеансу</span><strong style="color:var(--sage-deep)">Активний</strong></div></div><button class="ghost-button" data-action="open-branch-switcher" type="button" style="width:100%;justify-content:center;margin-top:20px">Змінити філію</button><div class="settings-danger"><button class="danger-button" data-action="logout" type="button">Вийти з системи</button></div></aside></section>`;
 }
 
 function initials(name) {
@@ -569,10 +688,17 @@ function finishTimelineDrag(commit = true) {
 }
 
 function render() {
+  if (!state.authenticated) {
+    renderLoginScreen();
+    return;
+  }
   updateChrome();
   renderStats();
+  $("#stats-grid").hidden = state.section === "settings";
   const view = $("#app-view");
-  if (state.role === "client") {
+  if (state.section === "settings") {
+    view.innerHTML = renderUserSettings();
+  } else if (state.role === "client") {
     view.innerHTML = renderClientPortal();
   } else if (state.section === "schedule") {
     view.innerHTML = renderSchedule();
@@ -588,19 +714,28 @@ function updateChrome() {
     history: "Історія візитів",
     procedures: "Процедури",
     resources: "Кабінети й обладнання",
-    team: "Команда"
+    team: "Команда",
+    settings: "Налаштування профілю"
   }[state.section] || (state.role === "client" ? "Мій запис" : "Розклад");
+  const firstName = state.user?.name?.split(" ")[0] || (state.role === "client" ? "Марино" : state.role === "master" ? "Ірино" : "Ольго");
   const roleData = {
-    admin: { title: "Доброго ранку, Ольго", subtitle: "У студії спокійний ритм — 5 записів сьогодні, 2 потребують вашої уваги." },
-    master: { title: "Сьогодні у вас 2 сеанси", subtitle: "Ірино, розклад готовий. Історія клієнта доступна в один клік." },
-    client: { title: "Вітаємо, Марино", subtitle: "Ваш наступний запис зібрано й підтверджено. Усі деталі — нижче." }
+    admin: { title: `Доброго ранку, ${firstName}`, subtitle: "У студії спокійний ритм — записи, команда й ресурси під контролем." },
+    master: { title: "Сьогодні у вас 2 сеанси", subtitle: `${firstName}, розклад готовий. Історія клієнта доступна в один клік.` },
+    client: { title: `Вітаємо, ${firstName}`, subtitle: "Ваш наступний запис зібрано й підтверджено. Усі деталі — нижче." }
   }[state.role];
   $("#breadcrumb-current").textContent = current;
   $("#page-title").innerHTML = `${roleData.title} <span class="wave">✳</span>`;
   $("#page-subtitle").textContent = roleData.subtitle;
   $("#new-booking-button").style.display = state.role === "client" ? "none" : "inline-flex";
   $("#date-eyebrow").textContent = state.role === "client" ? "ОСОБИСТИЙ КАБІНЕТ · KRASUNYA" : formatDateEyebrow(state.selectedDate);
-  $("#role-select").value = state.role;
+  const branch = getCurrentBranch();
+  $("#branch-name").textContent = branch.name;
+  $("#branch-city").textContent = branch.city;
+  $("#branch-switcher").disabled = !["admin", "client"].includes(state.role);
+  $("#session-label").textContent = state.user ? roleLabel(state.user.role) : "Сеанс активний";
+  $("#account-name").textContent = state.user?.name || "Користувач";
+  $("#account-role").textContent = roleLabel(state.role);
+  $("#account-avatar").textContent = state.user?.initials || "К";
   $(".nav-count").textContent = state.role === "client" ? "" : String(getVisibleClients().length);
   $$(".nav-item").forEach((item) => item.classList.toggle("active", state.role !== "client" && item.dataset.section === state.section));
   $$(".nav-item").forEach((item) => {
@@ -845,8 +980,16 @@ function renderHistory() {
 }
 
 function renderClientPortal() {
-  const client = state.clients[0];
+  const client = state.clients[0] || {
+    id: state.user?.clientId || "",
+    name: state.user?.name || "Клієнт",
+    initials: state.user?.initials || "К",
+    phone: state.user?.phone || ""
+  };
   const upcoming = state.bookings[0];
+  if (!upcoming) {
+    return `<section class="client-view"><section class="panel client-hero"><div class="avatar">${escapeHtml(client.initials)}</div><div class="client-hero-copy"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.phone || "Ваш особистий кабінет")}</p></div><div class="client-hero-actions"><button class="ghost-button" data-action="open-settings" type="button">Мій профіль</button></div></section><section class="panel client-empty-state"><div class="portal-label">Філія · ${escapeHtml(getCurrentBranch().name)}</div><h2>У цій філії ще немає записів</h2><p>Оберіть іншу філію або зв’яжіться із салоном, щоб підібрати зручний час.</p><div class="client-empty-actions"><button class="ghost-button" data-action="open-branch-switcher" type="button">Обрати іншу філію</button><button class="primary-button" data-action="contact" type="button">Зв’язатися із салоном</button></div></section><section class="panel side-panel"><div class="portal-label">Історія</div><h2 class="side-panel-title" style="margin-top:7px">Візити з’являться тут</h2><p class="panel-subtitle" style="margin-top:7px">Після створення запису в обраній філії тут будуть доступні деталі маршруту та підтвердження.</p></section></section>`;
+  }
   const bookingMasters = getBookingMasters(upcoming);
   return `<section class="client-view"><section class="panel client-hero"><div class="avatar">${escapeHtml(client.initials)}</div><div class="client-hero-copy"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.phone)} · Постійний клієнт із 2024 року</p></div><div class="client-hero-actions"><button class="ghost-button" data-client-history="${client.id}" type="button">Історія візитів</button><button class="primary-button" data-action="verify" type="button"><span>✓</span> Перевірити запис</button></div></section><section class="panel upcoming-card"><div class="portal-label">Найближчий візит</div><div class="upcoming-date"><strong>${formatLongDate(upcoming.date)}</strong><span>${formatWeekday(upcoming.date)} · ${upcoming.start}</span></div><div class="master-strip"><div><div class="portal-label">Майстри вашого візиту</div><p class="master-strip-hint">Ви будете у цих майстрів за маршрутом процедури</p></div><div class="master-strip-list">${bookingMasters.map((master) => `<div class="master-strip-person">${renderMasterAvatar(master, "master-avatar-sm")}<span><strong>${escapeHtml(master.name)}</strong><small>${escapeHtml(master.role)}</small></span></div>`).join("")}</div></div><div class="booking-overview"><div class="booking-overview-top"><strong>${escapeHtml(upcoming.service)}</strong><span class="price-cell">${formatMoney(upcoming.price)}</span></div><p>Комплекс із ${upcoming.stages.length} етапів · загальна тривалість 2 години</p></div><div class="stage-list client-stage-list" style="color:var(--ink);margin-top:17px;padding-left:17px">${upcoming.stages.map((stage, index) => `<div class="stage"><div class="stage-name" style="color:var(--ink-soft)">${index + 1}. ${escapeHtml(stage.name)}</div><div class="stage-time" style="color:var(--coral-deep)">${escapeHtml(stage.start)}—${escapeHtml(stage.end)}</div><div class="stage-meta stage-master-meta" style="color:var(--muted)">${renderMasterAvatar(stage.master, "master-avatar-xs")}<span>${escapeHtml(stage.master)} · ${escapeHtml(stage.room)}</span></div></div>`).join("")}</div><div class="conflict-check">Запис підтверджено, усі ресурси зарезервовано</div></section><section class="panel client-history"><div class="side-panel-head"><div><div class="portal-label">Ваші візити</div><h2 class="side-panel-title">Історія процедур</h2></div><span class="tag">8 візитів</span></div><div class="history-list"><div class="history-row"><span class="history-date">27.08</span><span class="history-copy"><strong>LED-відновлення</strong><span>Ірина Мельник</span></span><span class="history-price">3 200 ₴</span></div><div class="history-row"><span class="history-date">14.08</span><span class="history-copy"><strong>Glow Reset</strong><span>Анна Левченко + Ірина Мельник</span></span><span class="history-price">6 800 ₴</span></div><div class="history-row"><span class="history-date">31.07</span><span class="history-copy"><strong>Кератиновий догляд</strong><span>Ірина Мельник</span></span><span class="history-price">2 400 ₴</span></div></div></section><section class="panel side-panel"><div class="portal-label">Для вас</div><h2 class="side-panel-title" style="margin-top:7px">Усе під контролем</h2><p class="panel-subtitle" style="margin-top:7px">Ми зібрали майстрів, кабінети та обладнання в один зрозумілий маршрут — вам залишається лише прийти.</p><button class="ghost-button" style="margin-top:17px" data-action="contact" type="button">Зв’язатися із салоном →</button></section></section>`;
 }
@@ -1124,8 +1267,9 @@ function showToast(message) {
 }
 
 function handleSection(section) {
+  if (!state.authenticated) return;
+  if (state.role === "client" && !["client", "settings"].includes(section)) return;
   state.section = section;
-  if (state.role === "client") state.role = "admin";
   render();
 }
 
@@ -1149,6 +1293,17 @@ document.addEventListener("pointercancel", (event) => {
 });
 
 document.addEventListener("click", async (event) => {
+  const authRoleButton = event.target.closest("[data-auth-role]");
+  if (authRoleButton) {
+    authRoleDraft = authRoleButton.dataset.authRole;
+    renderLoginScreen();
+    return;
+  }
+  const branchSelectButton = event.target.closest("[data-branch-select]");
+  if (branchSelectButton) {
+    await switchBranch(branchSelectButton.dataset.branchSelect);
+    return;
+  }
   const sectionButton = event.target.closest("[data-section]");
   if (sectionButton) {
     handleSection(sectionButton.dataset.section);
@@ -1228,7 +1383,14 @@ document.addEventListener("click", async (event) => {
     return;
   }
   const action = event.target.closest("[data-action]")?.dataset.action;
-  if (action === "add-procedure-to-visit") {
+  if (action === "open-branch-switcher") {
+    openBranchSwitcher();
+  } else if (action === "open-settings") {
+    state.section = "settings";
+    render();
+  } else if (action === "logout") {
+    await logoutFromSystem();
+  } else if (action === "add-procedure-to-visit") {
     const procedureId = $("#booking-procedure")?.value;
     const procedure = procedureId ? getProcedure(procedureId) : null;
     if (!procedure) return;
@@ -1263,13 +1425,6 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("change", (event) => {
-  if (event.target.id === "role-select") {
-    state.role = event.target.value;
-    state.section = state.role === "client" ? "client" : "schedule";
-    state.filterMaster = "all";
-    state.filterRoom = "all";
-    render();
-  }
   if (event.target.id === "master-filter") {
     state.filterMaster = event.target.value;
     render();
@@ -1287,6 +1442,49 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  if (event.target.id === "login-form") {
+    event.preventDefault();
+    await loginFromForm(event.target);
+    return;
+  }
+  if (event.target.id === "branch-create-form") {
+    event.preventDefault();
+    if (state.role !== "admin") return;
+    const data = new FormData(event.target);
+    const hours = String(data.get("hours") || "09:00–19:00").split("–");
+    const payload = { name: data.get("name"), city: data.get("city"), address: data.get("address"), phone: data.get("phone"), hoursStart: hours[0], hoursEnd: hours[1] || "19:00" };
+    try {
+      let branch = { ...payload, id: `branch-${Date.now()}` };
+      if (apiReady) {
+        const response = await apiRequest("/branches", { method: "POST", body: JSON.stringify(payload) });
+        branch = response.branch;
+      }
+      state.branches.push(branch);
+      await switchBranch(branch.id);
+      showToast(`Філію «${branch.name}» створено.`);
+    } catch (error) {
+      showToast(`Не вдалося створити філію: ${apiErrorMessage(error)}`);
+    }
+    return;
+  }
+  if (event.target.id === "profile-form") {
+    event.preventDefault();
+    const data = new FormData(event.target);
+    const payload = { name: data.get("name"), phone: data.get("phone") };
+    try {
+      let user = { ...state.user, ...payload, initials: String(payload.name).split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase() };
+      if (apiReady) {
+        const response = await apiRequest("/auth/profile", { method: "PATCH", body: JSON.stringify(payload) });
+        user = { ...user, ...response.user };
+      }
+      applySessionUser(user);
+      render();
+      showToast("Профіль оновлено.");
+    } catch (error) {
+      showToast(`Не вдалося зберегти профіль: ${apiErrorMessage(error)}`);
+    }
+    return;
+  }
   if (event.target.id === "reschedule-form") {
     event.preventDefault();
     const booking = state.bookings.find((item) => item.id === event.target.dataset.bookingId);
@@ -1397,7 +1595,7 @@ document.addEventListener("submit", async (event) => {
     return;
   }
   const client = getClient(data.get("client"));
-  const draftBooking = { id: `visit-${Date.now()}`, date: data.get("date"), clientId: client.id, client: client.name, phone: client.phone, service: candidate.service, kind: candidate.stages.length > 1 ? "complex" : "single", start: candidate.start, end: candidate.end, price: candidate.price, status: "booked", stages: candidate.stages };
+  const draftBooking = { id: `visit-${Date.now()}`, date: data.get("date"), branchId: state.branchId, clientId: client.id, client: client.name, phone: client.phone, service: candidate.service, kind: candidate.stages.length > 1 ? "complex" : "single", start: candidate.start, end: candidate.end, price: candidate.price, status: "booked", stages: candidate.stages };
   let savedBooking = draftBooking;
   if (apiReady) {
     try {

@@ -65,6 +65,22 @@ class BackendTests(unittest.TestCase):
             server.create_slot(self.connection, payload)
         self.assertEqual(context.exception.status, 409)
 
+    def test_role_login_returns_a_scoped_user(self):
+        token, user = server.login_user(self.connection, {"role": "client", "userId": "client-001-user", "password": server.DEMO_PASSWORD, "branchId": "branch-pechersk"})
+        self.assertTrue(token)
+        self.assertEqual(user["role"], "client")
+        self.assertEqual(user["branchId"], "branch-pechersk")
+
+    def test_wrong_password_is_rejected(self):
+        with self.assertRaises(server.ApiError) as context:
+            server.login_user(self.connection, {"role": "admin", "userId": "admin-001", "password": "wrong", "branchId": "branch-podil"})
+        self.assertEqual(context.exception.status, 401)
+
+    def test_admin_can_create_branch(self):
+        branch = server.create_branch(self.connection, {"name": "Центр", "city": "Київ", "address": "вул. Хрещатик, 1", "phone": "+38 044 555 01 03", "hoursStart": "10:00", "hoursEnd": "20:00"})
+        self.assertEqual(branch["city"], "Київ")
+        self.assertIsNotNone(self.connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch["id"],)).fetchone())
+
 
 if __name__ == "__main__":
     unittest.main()

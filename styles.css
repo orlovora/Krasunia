@@ -420,6 +420,10 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
 .client-hero-copy h2 { color: var(--ink); font-family: var(--font-display); font-size: 25px; font-weight: 500; letter-spacing: -0.04em; }
 .client-hero-copy p { margin-top: 4px; color: var(--muted); font-size: 11px; }
 .client-hero-actions { display: flex; gap: 7px; }
+.client-empty-state { grid-column: 1 / -1; min-height: 210px; padding: 30px; }
+.client-empty-state h2 { margin-top: 9px; color: var(--ink); font-family: var(--font-display); font-size: 29px; font-weight: 500; letter-spacing: -0.04em; }
+.client-empty-state p { max-width: 520px; margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.client-empty-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
 .upcoming-card { padding: 22px; }
 .portal-label { color: var(--coral-deep); font-size: 10px; font-weight: 700; letter-spacing: 0.11em; text-transform: uppercase; }
 .master-strip { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 13px 0 15px; padding: 12px 13px; background: #f5e8df; border: 1px solid rgba(236,138,97,0.14); border-radius: 12px; }
@@ -668,7 +672,7 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
   .table-row > :last-child { display: none; }
   .client-hero { align-items: flex-start; flex-wrap: wrap; padding: 17px; }
   .client-hero-actions { width: 100%; padding-left: 69px; }
-  .upcoming-card, .client-history { padding: 17px; }
+  .upcoming-card, .client-history, .client-empty-state { padding: 17px; }
   .form-grid { grid-template-columns: 1fr; }
   .form-field.full { grid-column: auto; }
   .master-strip { align-items: flex-start; flex-direction: column; gap: 10px; }

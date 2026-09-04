@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Local backend for the Krasunya salon booking MVP.
+"""Backend for the Krasunya salon booking MVP.
 
-The server deliberately uses only the Python standard library so the project can
-be run on a clean machine. It serves the existing frontend and exposes a small
-SQLite-backed API. The conflict check is performed inside a write transaction,
-so the browser preview is never the source of truth for a booking.
+The app uses SQLite for local development and a managed PostgreSQL database on
+Vercel. The conflict check is performed inside a write transaction, so the
+browser preview is never the source of truth for a booking.
 """
 
 from __future__ import annotations
@@ -22,9 +21,22 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+try:
+    import psycopg
+except ImportError:  # psycopg is installed by Vercel from requirements.txt.
+    psycopg = None
+
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("KRASUNYA_DB", ROOT / "krasunya.sqlite3"))
+DATABASE_URL = next(
+    (
+        os.environ.get(name)
+        for name in ("POSTGRES_URL", "DATABASE_URL", "POSTGRES_PRISMA_URL", "POSTGRES_URL_NON_POOLING")
+        if os.environ.get(name)
+    ),
+    "",
+)
 SALON_START = "09:00"
 SALON_END = "19:00"
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
@@ -118,12 +130,109 @@ def overlaps(start_a: str, end_a: str, start_b: str, end_b: str) -> bool:
     return parse_minutes(start_a) < parse_minutes(end_b) and parse_minutes(end_a) > parse_minutes(start_b)
 
 
-def connect() -> sqlite3.Connection:
+class HybridRow(dict):
+    """A row that supports both sqlite3.Row-style keys and integer indexes."""
+
+    def __init__(self, columns: list[str], values: tuple[Any, ...]):
+        super().__init__(zip(columns, values))
+        self._values = values
+
+    def __getitem__(self, key: int | str) -> Any:
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class PostgresCursor:
+    def __init__(self, cursor: Any):
+        self._cursor = cursor
+
+    def _row(self, values: tuple[Any, ...] | None) -> HybridRow | None:
+        if values is None:
+            return None
+        columns = [column.name for column in self._cursor.description or []]
+        return HybridRow(columns, values)
+
+    def fetchone(self) -> HybridRow | None:
+        return self._row(self._cursor.fetchone())
+
+    def fetchall(self) -> list[HybridRow]:
+        return [row for row in (self._row(values) for values in self._cursor.fetchall()) if row is not None]
+
+    @property
+    def rowcount(self) -> int:
+        return self._cursor.rowcount
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class PostgresConnection:
+    """Small sqlite-compatible adapter for the existing backend code."""
+
+    def __init__(self, url: str):
+        if psycopg is None:
+            raise RuntimeError("PostgreSQL configured but psycopg is not installed.")
+        self._connection = psycopg.connect(url)
+
+    @staticmethod
+    def _adapt_sql(sql: str) -> str:
+        sql = sql.replace("?", "%s")
+        sql = re.sub(r"^\s*BEGIN IMMEDIATE\s*$", "BEGIN", sql, flags=re.IGNORECASE)
+        if re.search(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", sql, flags=re.IGNORECASE):
+            sql = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", sql, flags=re.IGNORECASE)
+            sql = sql.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+        return sql
+
+    def execute(self, sql: str, params: tuple[Any, ...] | list[Any] | None = None) -> PostgresCursor:
+        cursor = self._connection.cursor()
+        cursor.execute(self._adapt_sql(sql), params or ())
+        return PostgresCursor(cursor)
+
+    def executescript(self, script: str) -> None:
+        for statement in script.split(";"):
+            if statement.strip():
+                self.execute(statement)
+
+    def commit(self) -> None:
+        self._connection.commit()
+
+    def rollback(self) -> None:
+        self._connection.rollback()
+
+    def close(self) -> None:
+        self._connection.close()
+
+    def __enter__(self) -> "PostgresConnection":
+        return self
+
+    def __exit__(self, error_type: Any, error: Any, traceback: Any) -> None:
+        try:
+            if error_type:
+                self.rollback()
+            else:
+                self.commit()
+        finally:
+            self.close()
+
+
+def connect() -> sqlite3.Connection | PostgresConnection:
+    if DATABASE_URL:
+        return PostgresConnection(DATABASE_URL)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH, timeout=10)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
+
+
+def begin_write(connection: sqlite3.Connection | PostgresConnection) -> None:
+    """Start a write transaction and serialize booking/resource mutations."""
+    connection.execute("BEGIN IMMEDIATE")
+    if DATABASE_URL:
+        # The JSON stage model cannot express a relational exclusion
+        # constraint, so serialize the short validation+write critical section.
+        connection.execute("SELECT pg_advisory_xact_lock(2718281828)")
 
 
 def init_db() -> None:
@@ -221,12 +330,36 @@ def init_db() -> None:
               created_by TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS unavailable_date_master_idx ON unavailable_slots(date, master);
+            CREATE TABLE IF NOT EXISTS sessions (
+              token TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              branch_id TEXT NOT NULL REFERENCES branches(id),
+              created_at TEXT NOT NULL
+            );
             """
         )
-        booking_columns = {row[1] for row in connection.execute("PRAGMA table_info(bookings)")}
+        if DATABASE_URL:
+            booking_columns = {
+                row["column_name"]
+                for row in connection.execute(
+                    "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ?",
+                    ("bookings",),
+                )
+            }
+        else:
+            booking_columns = {row[1] for row in connection.execute("PRAGMA table_info(bookings)")}
         if "branch_id" not in booking_columns:
             connection.execute("ALTER TABLE bookings ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'branch-podil'")
-        slot_columns = {row[1] for row in connection.execute("PRAGMA table_info(unavailable_slots)")}
+        if DATABASE_URL:
+            slot_columns = {
+                row["column_name"]
+                for row in connection.execute(
+                    "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ?",
+                    ("unavailable_slots",),
+                )
+            }
+        else:
+            slot_columns = {row[1] for row in connection.execute("PRAGMA table_info(unavailable_slots)")}
         if "branch_id" not in slot_columns:
             connection.execute("ALTER TABLE unavailable_slots ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'branch-podil'")
         for branch in BRANCHES_SEED:
@@ -319,22 +452,40 @@ def user_payload(user: sqlite3.Row, branch_id: str | None = None) -> dict[str, A
     return item
 
 
-def user_from_request(handler: "Handler") -> tuple[sqlite3.Row | None, str | None]:
+def session_token_from_request(handler: "Handler") -> str | None:
     cookie_header = handler.headers.get("Cookie", "")
-    token = next((part.strip().split("=", 1)[1] for part in cookie_header.split(";") if part.strip().startswith("krasunya_session=")), None)
-    user_id = SESSIONS.get(token) if token else None
-    if not user_id:
+    for part in cookie_header.split(";"):
+        name, separator, value = part.strip().partition("=")
+        if separator and name == "krasunya_session":
+            return value
+    return None
+
+
+def user_from_request(handler: "Handler") -> tuple[sqlite3.Row | None, str | None]:
+    token = session_token_from_request(handler)
+    if not token:
         return None, None
     with connect() as connection:
-        user = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        user = connection.execute(
+            "SELECT users.* FROM users JOIN sessions ON sessions.user_id = users.id WHERE sessions.token = ?",
+            (token,),
+        ).fetchone()
     return user, token
+
+
+def session_branch(token: str | None, fallback: str | None = None) -> str | None:
+    if not token:
+        return fallback
+    with connect() as connection:
+        row = connection.execute("SELECT branch_id FROM sessions WHERE token = ?", (token,)).fetchone()
+    return row["branch_id"] if row else fallback
 
 
 def require_user(handler: "Handler") -> tuple[sqlite3.Row, str, dict[str, Any]]:
     user, token = user_from_request(handler)
     if not user or not token:
         raise ApiError("Потрібно увійти в систему.", 401)
-    branch_id = SESSIONS.get(token + ":branch") or user["branch_id"]
+    branch_id = session_branch(token, user["branch_id"])
     return user, token, user_payload(user, branch_id)
 
 
@@ -378,8 +529,10 @@ def login_user(connection: sqlite3.Connection, payload: dict[str, Any]) -> tuple
     if role == "master" and branch_id != user["branch_id"]:
         raise ApiError("Майстер може увійти лише до своєї філії.", 403)
     token = secrets.token_urlsafe(32)
-    SESSIONS[token] = user["id"]
-    SESSIONS[token + ":branch"] = branch_id
+    connection.execute(
+        "INSERT INTO sessions (token, user_id, branch_id, created_at) VALUES (?, ?, ?, ?)",
+        (token, user["id"], branch_id, now_iso()),
+    )
     return token, user_payload(user, branch_id)
 
 
@@ -503,7 +656,7 @@ def validate_booking(connection: sqlite3.Connection, payload: dict[str, Any], ex
 
 
 def create_booking(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
-    connection.execute("BEGIN IMMEDIATE")
+    begin_write(connection)
     try:
         booking = validate_booking(connection, payload)
         timestamp = now_iso()
@@ -524,7 +677,7 @@ def update_client_masters(connection: sqlite3.Connection, booking: dict[str, Any
 
 
 def update_booking(connection: sqlite3.Connection, booking_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    connection.execute("BEGIN IMMEDIATE")
+    begin_write(connection)
     try:
         current = connection.execute("SELECT * FROM bookings WHERE id = ?", (booking_id,)).fetchone()
         if not current:
@@ -569,7 +722,7 @@ def validate_slot(connection: sqlite3.Connection, payload: dict[str, Any], exclu
 
 
 def create_slot(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
-    connection.execute("BEGIN IMMEDIATE")
+    begin_write(connection)
     try:
         slot = validate_slot(connection, payload)
         connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, end, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tuple(slot[key] for key in ("id", "date", "branchId", "master", "start", "end", "reason", "createdBy")))
@@ -581,7 +734,7 @@ def create_slot(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict
 
 
 def update_slot(connection: sqlite3.Connection, slot_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    connection.execute("BEGIN IMMEDIATE")
+    begin_write(connection)
     try:
         current = connection.execute("SELECT * FROM unavailable_slots WHERE id = ?", (slot_id,)).fetchone()
         if not current:
@@ -597,7 +750,7 @@ def update_slot(connection: sqlite3.Connection, slot_id: str, payload: dict[str,
 
 
 def delete_slot(connection: sqlite3.Connection, slot_id: str) -> None:
-    connection.execute("BEGIN IMMEDIATE")
+    begin_write(connection)
     try:
         result = connection.execute("DELETE FROM unavailable_slots WHERE id = ?", (slot_id,))
         if result.rowcount == 0:
@@ -659,10 +812,10 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             with connect() as connection:
                 if parsed.path == "/api/health":
-                    self.send_json(200, {"ok": True})
+                    self.send_json(200, {"ok": True, "storage": "postgres" if DATABASE_URL else "sqlite"})
                 elif parsed.path == "/api/auth/session":
                     user, token = user_from_request(self)
-                    branch_id = SESSIONS.get(token + ":branch") if token else None
+                    branch_id = session_branch(token, user["branch_id"] if user else None)
                     self.send_json(200, auth_session_payload(connection, user, branch_id))
                 elif parsed.path == "/api/bootstrap":
                     user, _, user_data = require_user(self)
@@ -728,8 +881,7 @@ class Handler(SimpleHTTPRequestHandler):
                 elif parts == ["api", "auth", "logout"] and method == "POST":
                     _, token = user_from_request(self)
                     if token:
-                        SESSIONS.pop(token, None)
-                        SESSIONS.pop(token + ":branch", None)
+                        connection.execute("DELETE FROM sessions WHERE token = ?", (token,))
                     self.send_json(200, {"authenticated": False}, set_cookie="krasunya_session=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/")
                 elif parts == ["api", "auth", "branch"] and method == "POST":
                     user, token, user_data = require_user(self)
@@ -738,13 +890,13 @@ class Handler(SimpleHTTPRequestHandler):
                     branch_id = str(payload.get("branchId") or "")
                     if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
                         raise ApiError("Філію не знайдено.", 404)
-                    SESSIONS[token + ":branch"] = branch_id
+                    connection.execute("UPDATE sessions SET branch_id = ? WHERE token = ?", (branch_id, token))
                     self.send_json(200, {"user": user_payload(user, branch_id)})
                 elif parts == ["api", "auth", "profile"] and method == "PATCH":
                     user, token, _ = require_user(self)
                     update_profile(connection, user["id"], payload)
                     refreshed = connection.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
-                    self.send_json(200, {"user": user_payload(refreshed, SESSIONS.get(token + ":branch") or refreshed["branch_id"])})
+                    self.send_json(200, {"user": user_payload(refreshed, session_branch(token, refreshed["branch_id"]))})
                 elif parts == ["api", "branches"] and method == "POST":
                     _, _, user_data = require_user(self)
                     if user_data["role"] != "admin":
@@ -785,7 +937,7 @@ def main() -> None:
     port = int(os.environ.get("PORT", "4173"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"Красуня backend: http://0.0.0.0:{port}")
-    print(f"SQLite: {DB_PATH}")
+    print(f"Storage: {'PostgreSQL' if DATABASE_URL else f'SQLite {DB_PATH}'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

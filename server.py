@@ -311,7 +311,7 @@ def init_db() -> None:
               service TEXT NOT NULL,
               kind TEXT NOT NULL,
               start TEXT NOT NULL,
-              end TEXT NOT NULL,
+              "end" TEXT NOT NULL,
               price INTEGER NOT NULL,
               status TEXT NOT NULL,
               stages_json TEXT NOT NULL,
@@ -325,7 +325,7 @@ def init_db() -> None:
               branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id),
               master TEXT NOT NULL REFERENCES masters(name),
               start TEXT NOT NULL,
-              end TEXT NOT NULL,
+              "end" TEXT NOT NULL,
               reason TEXT NOT NULL DEFAULT '',
               created_by TEXT NOT NULL
             );
@@ -385,10 +385,10 @@ def seed_db(connection: sqlite3.Connection) -> None:
     for procedure in SEED["procedures"]:
         connection.execute("INSERT INTO procedures VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (procedure["id"], procedure["name"], procedure["category"], procedure["duration"], procedure["price"], procedure["stages"], procedure["relation"], json.dumps(procedure["resourcePlan"], ensure_ascii=False)))
     for slot in SEED["unavailableSlots"]:
-        connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, end, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (slot["id"], slot["date"], "branch-podil", slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"]))
+        connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, \"end\", reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (slot["id"], slot["date"], "branch-podil", slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"]))
     timestamp = now_iso()
     for booking in SEED["bookings"]:
-        connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, end, price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], "branch-podil", booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
+        connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, \"end\", price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], "branch-podil", booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
 
 
 def row_client(row: sqlite3.Row) -> dict[str, Any]:
@@ -660,7 +660,7 @@ def create_booking(connection: sqlite3.Connection, payload: dict[str, Any]) -> d
     try:
         booking = validate_booking(connection, payload)
         timestamp = now_iso()
-        connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, end, price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
+        connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, \"end\", price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
         update_client_masters(connection, booking)
         connection.commit()
         return booking
@@ -685,7 +685,7 @@ def update_booking(connection: sqlite3.Connection, booking_id: str, payload: dic
         current_data = row_booking(current)
         merged = {**current_data, **payload, "id": booking_id}
         booking = validate_booking(connection, merged, excluded_id=booking_id)
-        connection.execute("UPDATE bookings SET date=?, branch_id=?, client_id=?, client=?, phone=?, service=?, kind=?, start=?, end=?, price=?, status=?, stages_json=?, updated_at=? WHERE id=?", (booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), now_iso(), booking_id))
+        connection.execute("UPDATE bookings SET date=?, branch_id=?, client_id=?, client=?, phone=?, service=?, kind=?, start=?, \"end\"=?, price=?, status=?, stages_json=?, updated_at=? WHERE id=?", (booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), now_iso(), booking_id))
         update_client_masters(connection, booking)
         connection.commit()
         return booking
@@ -725,7 +725,7 @@ def create_slot(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict
     begin_write(connection)
     try:
         slot = validate_slot(connection, payload)
-        connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, end, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tuple(slot[key] for key in ("id", "date", "branchId", "master", "start", "end", "reason", "createdBy")))
+        connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, \"end\", reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tuple(slot[key] for key in ("id", "date", "branchId", "master", "start", "end", "reason", "createdBy")))
         connection.commit()
         return slot
     except Exception:
@@ -741,7 +741,7 @@ def update_slot(connection: sqlite3.Connection, slot_id: str, payload: dict[str,
             raise ApiError("Неробочий інтервал не знайдено.", 404)
         merged = {**row_slot(current), **payload, "id": slot_id}
         slot = validate_slot(connection, merged, excluded_id=slot_id)
-        connection.execute("UPDATE unavailable_slots SET date=?, branch_id=?, master=?, start=?, end=?, reason=?, created_by=? WHERE id=?", (slot["date"], slot["branchId"], slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"], slot_id))
+        connection.execute("UPDATE unavailable_slots SET date=?, branch_id=?, master=?, start=?, \"end\"=?, reason=?, created_by=? WHERE id=?", (slot["date"], slot["branchId"], slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"], slot_id))
         connection.commit()
         return slot
     except Exception:

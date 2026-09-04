@@ -1,15 +1,26 @@
 """Vercel serverless adapter for the Krasunya HTTP handler."""
 
-from pathlib import Path
+from http.server import BaseHTTPRequestHandler
 
 import server
 
 
-# Vercel's deployment filesystem is read-only. The backend uses the managed
-# PostgreSQL URL when it is configured and keeps SQLite only as a local/demo
-# fallback for development.
-server.DB_PATH = Path("/tmp/krasunya.sqlite3")
+# Vercel statically detects Python Functions from an explicit handler class.
+# The actual route implementation stays in server.py so local and hosted
+# requests share the same validation and persistence code.
 server.init_db()
 
-# Vercel discovers Python functions through a lowercase `handler` class.
-handler = server.Handler
+
+class handler(BaseHTTPRequestHandler):
+    """Expose the shared backend methods through Vercel's Python runtime."""
+
+    do_GET = server.Handler.do_GET
+    do_POST = server.Handler.do_POST
+    do_PATCH = server.Handler.do_PATCH
+    do_PUT = server.Handler.do_PUT
+    do_DELETE = server.Handler.do_DELETE
+    mutate = server.Handler.mutate
+    send_json = server.Handler.send_json
+    read_json = server.Handler.read_json
+    handle_api_error = server.Handler.handle_api_error
+    log_message = server.Handler.log_message

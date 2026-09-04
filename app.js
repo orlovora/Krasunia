@@ -175,7 +175,7 @@ async function loadPersistentState() {
   } catch (error) {
     apiAvailable = false;
     state.authenticated = false;
-    renderLoginScreen(apiErrorMessage(error));
+    render();
     console.warn("Backend недоступний, вхід працює в локальному демо-режимі.", error);
   }
 }

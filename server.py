@@ -802,12 +802,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(error.status, {"error": error.message, "details": error.details})
         else:
             print(f"API error: {error!r}")
-            # Keep the public response generic, but expose the exception class
-            # to the frontend while diagnosing hosted runtime failures.
-            detail = str(error).splitlines()[0].strip()
-            if len(detail) > 160:
-                detail = detail[:157] + "..."
-            self.send_json(500, {"error": "Внутрішня помилка сервера.", "details": [f"Діагностика: {type(error).__name__}: {detail}"]})
+            self.send_json(500, {"error": "Внутрішня помилка сервера."})
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)

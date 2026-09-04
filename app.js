@@ -1,8 +1,15 @@
 const state = {
   role: "admin",
+  authenticated: false,
+  user: null,
   section: "schedule",
   view: "day",
   selectedDate: "2026-09-04",
+  branchId: "branch-podil",
+  branches: [
+    { id: "branch-podil", name: "Поділ", city: "Київ", address: "вул. Нижній Вал, 17", phone: "+38 044 555 01 01", hoursStart: "09:00", hoursEnd: "19:00" },
+    { id: "branch-pechersk", name: "Печерськ", city: "Київ", address: "вул. Басейна, 4", phone: "+38 044 555 01 02", hoursStart: "09:00", hoursEnd: "20:00" }
+  ],
   filterMaster: "all",
   filterRoom: "all",
   unavailableSlots: [
@@ -120,9 +127,17 @@ const scheduleHourHeight = 72;
 const currentMasterName = "Ірина Мельник";
 const API_BASE = "/api";
 let apiReady = false;
+let apiAvailable = false;
+let authRoleDraft = "admin";
 let timelineDrag = null;
 let bookingDraftProcedures = [];
 let bookingDraftOffsets = {};
+
+const demoUsers = {
+  admin: [{ id: "admin-001", name: "Ольга Коваль", role: "admin", initials: "ОК", email: "olga@krasunya.local" }],
+  master: [{ id: "master-001", name: "Ірина Мельник", role: "master", initials: "ІМ", email: "iryna@krasunya.local" }],
+  client: [{ id: "client-001-user", name: "Марина Соколова", role: "client", initials: "МС", email: "marina@krasunya.local" }]
+};
 
 function apiErrorMessage(error) {
   if (error?.details?.length) return error.details[0];
@@ -141,15 +156,39 @@ async function apiRequest(path, options = {}) {
 
 async function loadPersistentState() {
   try {
+    const session = await apiRequest("/auth/session");
+    apiAvailable = true;
+    if (Array.isArray(session.branches)) state.branches = session.branches;
+    if (!session.authenticated) {
+      state.authenticated = false;
+      render();
+      return;
+    }
+    applySessionUser(session.user);
     const payload = await apiRequest("/bootstrap");
     ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots"].forEach((key) => {
       if (Array.isArray(payload[key])) state[key] = payload[key];
     });
     apiReady = true;
+    if (payload.session) applySessionUser(payload.session);
     render();
   } catch (error) {
-    console.warn("Backend недоступний, використовується демо-стан.", error);
+    apiAvailable = false;
+    state.authenticated = false;
+    render();
+    console.warn("Backend недоступний, вхід працює в локальному демо-режимі.", error);
   }
+}
+
+function applySessionUser(user) {
+  state.user = user;
+  state.authenticated = Boolean(user);
+  if (!user) return;
+  state.role = user.role;
+  state.branchId = user.branchId || state.branchId;
+  state.section = user.role === "client" ? "client" : "schedule";
+  state.filterMaster = "all";
+  state.filterRoom = "all";
 }
 
 const $ = (selector, root = document) => root.querySelector(selector);

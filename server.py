@@ -739,8 +739,11 @@ def delete_admin(connection: sqlite3.Connection, admin_id: str, current_user_id:
 
 
 def delete_branch(connection: sqlite3.Connection, branch_id: str, current_branch_id: str | None = None, current_user_id: str | None = None) -> None:
-    if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
+    branch = connection.execute("SELECT status FROM branches WHERE id = ?", (branch_id,)).fetchone()
+    if not branch:
         raise ApiError("Філію не знайдено.", 404)
+    if branch["status"] == CLOSED_BRANCH_STATUS:
+        raise ApiError("Закриту філію не можна видалити: її архів має зберігатися.", 409)
     if connection.execute("SELECT COUNT(*) FROM branches").fetchone()[0] <= 1:
         raise ApiError("У системі має залишитися щонайменше одна філія.", 409)
     fallback = connection.execute("SELECT id FROM branches WHERE id != ? ORDER BY city, name LIMIT 1", (branch_id,)).fetchone()["id"]

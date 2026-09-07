@@ -170,6 +170,10 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(server.ApiError) as context:
             server.login_user(self.connection, {"role": "client", "userId": "client-001-user", "password": server.DEMO_PASSWORD, "branchId": branch["id"]})
         self.assertEqual(context.exception.status, 403)
+        with self.assertRaises(server.ApiError) as context:
+            server.delete_branch(self.connection, branch["id"])
+        self.assertEqual(context.exception.status, 409)
+        self.assertIn("архів", context.exception.message)
 
     def test_legacy_resource_tables_are_migrated_to_branch_scoped_keys(self):
         legacy_path = Path(self.temp_dir.name) / "legacy.sqlite3"

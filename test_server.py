@@ -81,6 +81,34 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(branch["city"], "Київ")
         self.assertIsNotNone(self.connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch["id"],)).fetchone())
 
+    def test_admin_can_create_and_delete_another_admin(self):
+        admin = server.create_admin(self.connection, {"name": "Марія Бондар", "email": "maria@krasunya.local", "phone": "+38 067 000 00 10", "branchId": "branch-pechersk", "password": "secret1"}, "branch-podil")
+        self.assertEqual(admin["role"], "admin")
+        token, logged_in = server.login_user(self.connection, {"role": "admin", "userId": admin["id"], "password": "secret1", "branchId": "branch-pechersk"})
+        self.assertTrue(token)
+        self.assertEqual(logged_in["branchId"], "branch-pechersk")
+        server.delete_admin(self.connection, admin["id"], "admin-001")
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM users WHERE id = ?", (admin["id"],)).fetchone())
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM sessions WHERE user_id = ?", (admin["id"],)).fetchone())
+
+    def test_admin_and_branch_deletion_guards(self):
+        with self.assertRaises(server.ApiError) as context:
+            server.delete_admin(self.connection, "admin-001", "admin-001")
+        self.assertEqual(context.exception.status, 409)
+        empty_branch = server.create_branch(self.connection, {"name": "Центр", "city": "Київ", "address": "вул. Хрещатик, 1"})
+        server.delete_branch(self.connection, empty_branch["id"])
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM branches WHERE id = ?", (empty_branch["id"],)).fetchone())
+        with self.assertRaises(server.ApiError) as context:
+            server.delete_branch(self.connection, "branch-podil")
+        self.assertEqual(context.exception.status, 409)
+
+    def test_uploaded_photo_is_validated_and_kept_as_data_url(self):
+        photo = "data:image/jpeg;base64,ZmFrZQ=="
+        master = server.create_master(self.connection, {"name": "Фото Майстриня", "role": "Естетистка", "focus": "Догляд", "schedule": "10:00–18:00", "color": "sage", "email": "photo@krasunya.local", "password": "secret1", "photo": photo}, "branch-podil")
+        self.assertEqual(master["photo"], photo)
+        with self.assertRaises(server.ApiError):
+            server.create_master(self.connection, {"name": "Погане Фото", "role": "Естетистка", "focus": "Догляд", "schedule": "10:00–18:00", "color": "sage", "email": "bad-photo@krasunya.local", "password": "secret1", "photo": "data:text/html;base64,ZmFrZQ=="}, "branch-podil")
+
     def test_admin_can_create_master_with_login(self):
         master = server.create_master(self.connection, {"name": "Нова Майстриня", "role": "Естетистка", "focus": "Догляд", "schedule": "10:00–18:00", "color": "sage", "email": "new-master@krasunya.local", "phone": "+38 067 000 00 09", "password": "secret1"}, "branch-podil")
         self.assertEqual(master["name"], "Нова Майстриня")

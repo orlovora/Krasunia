@@ -42,6 +42,8 @@ SALON_END = "19:00"
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 DEMO_PASSWORD = "demo123"
 SESSIONS: dict[str, str] = {}
+MAX_PHOTO_DATA_LENGTH = 700_000
+PHOTO_DATA_RE = re.compile(r"^data:image/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=\s]+$")
 
 
 BRANCHES_SEED = [
@@ -512,7 +514,7 @@ def branches_for(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 
 def login_users_for(connection: sqlite3.Connection, role: str) -> list[dict[str, Any]]:
     users = []
-    for row in connection.execute("SELECT id, name, email, role, master_name, branch_id FROM users WHERE role = ? ORDER BY name", (role,)):
+    for row in connection.execute("SELECT id, name, email, phone, role, master_name, branch_id FROM users WHERE role = ? ORDER BY name", (role,)):
         item = dict(row)
         item["masterName"] = item.pop("master_name")
         item["branchId"] = item.pop("branch_id")
@@ -562,6 +564,67 @@ def create_branch(connection: sqlite3.Connection, payload: dict[str, Any]) -> di
     branch = {"id": f"branch-{uuid.uuid4().hex[:10]}", "name": name, "city": city, "address": address, "phone": phone, "hoursStart": hours_start, "hoursEnd": hours_end}
     connection.execute("INSERT INTO branches VALUES (?, ?, ?, ?, ?, ?, ?)", (branch["id"], branch["name"], branch["city"], branch["address"], branch["phone"], branch["hoursStart"], branch["hoursEnd"]))
     return branch
+
+
+def create_admin(connection: sqlite3.Connection, payload: dict[str, Any], default_branch_id: str) -> dict[str, Any]:
+    name = str(payload.get("name") or "").strip()
+    email = str(payload.get("email") or "").strip().lower()
+    phone = str(payload.get("phone") or "").strip()
+    password = str(payload.get("password") or "")
+    branch_id = str(payload.get("branchId") or default_branch_id)
+    if not name or not email:
+        raise directory_error("Заповніть ім’я та email адміністратора.")
+    if len(password) < 6:
+        raise directory_error("Пароль адміністратора має містити щонайменше 6 символів.")
+    if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
+        raise directory_error("Оберіть існуючу філію.", 404)
+    if connection.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+        raise directory_error("Користувач із таким email уже існує.", 409)
+    user = {
+        "id": f"admin-{uuid.uuid4().hex[:12]}",
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "role": "admin",
+        "masterName": "",
+        "clientId": "",
+        "branchId": branch_id,
+        "initials": initials_for(name),
+    }
+    connection.execute(
+        "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (user["id"], user["name"], user["email"], user["phone"], user["role"], "", "", branch_id, user["initials"], password_hash(password)),
+    )
+    return user
+
+
+def delete_admin(connection: sqlite3.Connection, admin_id: str, current_user_id: str) -> None:
+    admin = connection.execute("SELECT * FROM users WHERE id = ? AND role = 'admin'", (admin_id,)).fetchone()
+    if not admin:
+        raise ApiError("Адміністратора не знайдено.", 404)
+    if admin_id == current_user_id:
+        raise ApiError("Не можна видалити власний обліковий запис.", 409)
+    if connection.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetchone()[0] <= 1:
+        raise ApiError("У системі має залишитися щонайменше один адміністратор.", 409)
+    # Revoke every active session before deleting the user. Existing tokens must
+    # not remain usable after an administrator is removed.
+    connection.execute("DELETE FROM sessions WHERE user_id = ?", (admin_id,))
+    connection.execute("DELETE FROM users WHERE id = ?", (admin_id,))
+
+
+def delete_branch(connection: sqlite3.Connection, branch_id: str) -> None:
+    if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
+        raise ApiError("Філію не знайдено.", 404)
+    if connection.execute("SELECT COUNT(*) FROM branches").fetchone()[0] <= 1:
+        raise ApiError("У системі має залишитися щонайменше одна філія.", 409)
+    references = []
+    for table in ("users", "bookings", "unavailable_slots", "sessions"):
+        count = connection.execute(f"SELECT COUNT(*) FROM {table} WHERE branch_id = ?", (branch_id,)).fetchone()[0]
+        if count:
+            references.append(f"{table}: {count}")
+    if references:
+        raise ApiError("Філію не можна видалити, доки вона використовується.", 409, references)
+    connection.execute("DELETE FROM branches WHERE id = ?", (branch_id,))
 
 
 def update_profile(connection: sqlite3.Connection, user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -616,11 +679,28 @@ def directory_error(message: str, status: int = 422) -> ApiError:
     return ApiError(message, status)
 
 
+def validate_photo(value: Any) -> str:
+    photo = str(value or "").strip()
+    if not photo:
+        return ""
+    if photo.startswith("data:"):
+        if len(photo) > MAX_PHOTO_DATA_LENGTH:
+            raise directory_error("Фото завелике. Оберіть зображення до 512 КБ.", 413)
+        if not PHOTO_DATA_RE.fullmatch(photo):
+            raise directory_error("Підтримуються лише JPEG, PNG, WebP або GIF.")
+        return photo
+    # Keep legacy seed photos working when an existing master is edited. New
+    # uploads from the form are always converted to a data URL in the browser.
+    if photo.startswith(("https://", "http://")):
+        return photo
+    raise directory_error("Фото має бути завантаженим зображенням або коректним URL.")
+
+
 def create_master(connection: sqlite3.Connection, payload: dict[str, Any], branch_id: str) -> dict[str, Any]:
     name = str(payload.get("name") or "").strip()
     role = str(payload.get("role") or "Майстер").strip()
     focus = str(payload.get("focus") or "").strip()
-    photo = str(payload.get("photo") or "").strip()
+    photo = validate_photo(payload.get("photo"))
     color = str(payload.get("color") or "peach").strip()
     email = str(payload.get("email") or "").strip().lower()
     phone = str(payload.get("phone") or "").strip()
@@ -655,7 +735,7 @@ def update_master(connection: sqlite3.Connection, master_name: str, payload: dic
         raise directory_error("Ім’я майстра не можна змінювати після створення, бо воно використовується в записах.")
     role = str(payload.get("role") or current["role"]).strip()
     focus = str(payload.get("focus") or current["focus"]).strip()
-    photo = str(payload.get("photo") if payload.get("photo") is not None else current["photo"]).strip()
+    photo = validate_photo(payload.get("photo") if payload.get("photo") is not None else current["photo"])
     color = str(payload.get("color") or current["color"]).strip()
     _, _, schedule = parse_schedule(payload.get("schedule") or current["schedule"])
     if not role or not focus:
@@ -1160,9 +1240,9 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             parts = parsed.path.strip("/").split("/")
-            if len(parts) != 3 or parts[0] != "api" or parts[1] not in {"availability", "masters", "rooms", "equipment", "procedures"}:
+            if len(parts) != 3 or parts[0] != "api" or parts[1] not in {"availability", "admins", "branches", "masters", "rooms", "equipment", "procedures"}:
                 raise ApiError("Маршрут API не знайдено.", 404)
-            _, _, user_data = require_user(self)
+            user, _, user_data = require_user(self)
             if parts[1] == "availability" and user_data["role"] == "client":
                 raise ApiError("Клієнт не може змінювати неробочий час.", 403)
             if parts[1] != "availability" and user_data["role"] != "admin":
@@ -1170,6 +1250,22 @@ class Handler(SimpleHTTPRequestHandler):
             with connect() as connection:
                 if parts[1] == "availability":
                     delete_slot(connection, unquote(parts[2]))
+                elif parts[1] == "admins":
+                    begin_write(connection)
+                    try:
+                        delete_admin(connection, unquote(parts[2]), user["id"])
+                        connection.commit()
+                    except Exception:
+                        connection.rollback()
+                        raise
+                elif parts[1] == "branches":
+                    begin_write(connection)
+                    try:
+                        delete_branch(connection, unquote(parts[2]))
+                        connection.commit()
+                    except Exception:
+                        connection.rollback()
+                        raise
                 else:
                     begin_write(connection)
                     try:
@@ -1227,6 +1323,11 @@ class Handler(SimpleHTTPRequestHandler):
                     if user_data["role"] != "admin":
                         raise ApiError("Тільки адміністратор може створювати філії.", 403)
                     self.send_json(201, {"branch": create_branch(connection, payload)})
+                elif parts == ["api", "admins"] and method == "POST":
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може додавати адміністраторів.", 403)
+                    self.send_json(201, {"admin": create_admin(connection, payload, user_data["branchId"])})
                 elif parts == ["api", "masters"] and method == "POST":
                     _, _, user_data = require_user(self)
                     if user_data["role"] != "admin":

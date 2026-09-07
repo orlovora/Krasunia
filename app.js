@@ -342,8 +342,36 @@ async function loginFromForm(form) {
 function openBranchSwitcher() {
   if (!state.authenticated || !["admin", "client"].includes(state.role)) return;
   const currentBranch = getCurrentBranch();
-  $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Локація роботи</div><h2 id="modal-title">Оберіть філію</h2><p>${state.role === "admin" ? "Адміністратор може перемикати робочі локації та додавати нові." : "Оберіть салон, до якого хочете записатися."}</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><div class="modal-form"><div class="branch-list">${state.branches.map((branch, index) => `<button class="branch-option ${branch.id === currentBranch.id ? "active" : ""}" data-branch-select="${escapeHtml(branch.id)}" type="button"><span class="branch-option-mark">${String(index + 1).padStart(2, "0")}</span><span class="branch-option-copy"><strong>${escapeHtml(branch.name)} · ${escapeHtml(branch.city)}</strong><span>${escapeHtml(branch.address)} · ${escapeHtml(branch.phone || "Контакти не вказані")}</span></span>${branch.id === currentBranch.id ? `<span class="branch-current">Обрано</span>` : ""}</button>`).join("")}</div>${state.role === "admin" ? `<div class="branch-create"><div class="branch-create-head"><strong>Додати нову філію</strong><span class="tag">для адміністратора</span></div><form id="branch-create-form" class="form-grid"><div class="form-field"><label for="branch-create-name">Назва</label><input id="branch-create-name" name="name" placeholder="Наприклад, Центр" required /></div><div class="form-field"><label for="branch-create-city">Місто</label><input id="branch-create-city" name="city" placeholder="Київ" required /></div><div class="form-field full"><label for="branch-create-address">Адреса</label><input id="branch-create-address" name="address" placeholder="вул. ..." required /></div><div class="form-field"><label for="branch-create-phone">Телефон</label><input id="branch-create-phone" name="phone" placeholder="+38 ..." /></div><div class="form-field"><label for="branch-create-hours">Години</label><input id="branch-create-hours" name="hours" value="09:00–19:00" placeholder="09:00–19:00" /></div><div class="modal-actions full"><button class="primary-button" type="submit"><span>＋</span> Створити філію</button></div></form></div>` : ""}</div>`;
+  const branchRows = state.branches.map((branch, index) => `
+    <div class="branch-option-row">
+      <button class="branch-option ${branch.id === currentBranch.id ? "active" : ""}" data-branch-select="${escapeHtml(branch.id)}" type="button">
+        <span class="branch-option-mark">${String(index + 1).padStart(2, "0")}</span>
+        <span class="branch-option-copy"><strong>${escapeHtml(branch.name)} · ${escapeHtml(branch.city)}</strong><span>${escapeHtml(branch.address)} · ${escapeHtml(branch.phone || "Контакти не вказані")}</span></span>
+        ${branch.id === currentBranch.id ? `<span class="branch-current">Обрано</span>` : ""}
+      </button>
+      ${state.role === "admin" ? `<button class="icon-button branch-delete" data-branch-delete="${escapeHtml(branch.id)}" type="button" aria-label="Видалити філію" ${branch.id === currentBranch.id ? "disabled" : ""}>×</button>` : ""}
+    </div>`).join("");
+  $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Локація роботи</div><h2 id="modal-title">Оберіть філію</h2><p>${state.role === "admin" ? "Адміністратор може перемикати робочі локації, додавати й видаляти філії." : "Оберіть салон, до якого хочете записатися."}</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><div class="modal-form"><div class="branch-list">${branchRows || `<div class="empty-directory">Поки немає філій.</div>`}</div>${state.role === "admin" ? `<div class="branch-create"><div class="branch-create-head"><strong>Додати нову філію</strong><span class="tag">для адміністратора</span></div><form id="branch-create-form" class="form-grid"><div class="form-field"><label for="branch-create-name">Назва</label><input id="branch-create-name" name="name" placeholder="Наприклад, Центр" required /></div><div class="form-field"><label for="branch-create-city">Місто</label><input id="branch-create-city" name="city" placeholder="Київ" required /></div><div class="form-field full"><label for="branch-create-address">Адреса</label><input id="branch-create-address" name="address" placeholder="вул. ..." required /></div><div class="form-field"><label for="branch-create-phone">Телефон</label><input id="branch-create-phone" name="phone" placeholder="+38 ..." /></div><div class="form-field"><label for="branch-create-hours">Години</label><input id="branch-create-hours" name="hours" value="09:00–19:00" placeholder="09:00–19:00" /></div><div class="modal-actions full"><button class="primary-button" type="submit"><span>＋</span> Створити філію</button></div></form></div>` : ""}</div>`;
   showModal();
+}
+
+async function deleteBranch(branchId) {
+  if (state.role !== "admin") return;
+  const branch = state.branches.find((item) => item.id === branchId);
+  if (!branch || branch.id === state.branchId) {
+    showToast("Спочатку перемкніться на іншу філію.");
+    return;
+  }
+  if (!window.confirm(`Видалити філію «${branch.name}»? Дію не можна скасувати.`)) return;
+  try {
+    if (apiReady) await apiRequest(`/branches/${encodeURIComponent(branchId)}`, { method: "DELETE" });
+    state.branches = state.branches.filter((item) => item.id !== branchId);
+    await refreshLoginUsers().catch(() => {});
+    openBranchSwitcher();
+    showToast(`Філію «${branch.name}» видалено.`);
+  } catch (error) {
+    showToast(`Не вдалося видалити філію: ${apiErrorMessage(error)}`);
+  }
 }
 
 async function switchBranch(branchId) {
@@ -975,6 +1003,65 @@ function directoryEntityLabel(entity) {
   return { master: "майстра", room: "кабінет", equipment: "обладнання", procedure: "процедуру" }[entity];
 }
 
+function openAdminModal() {
+  if (state.role !== "admin") return;
+  const branchOptions = state.branches.map((branch) => `<option value="${escapeHtml(branch.id)}" ${branch.id === state.branchId ? "selected" : ""}>${escapeHtml(branch.name)} · ${escapeHtml(branch.city)}</option>`).join("");
+  $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Доступ до системи</div><h2 id="modal-title">Додати адміністратора</h2><p>Новий адміністратор отримає окремий вхід і зможе керувати всіма філіями.</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><form class="modal-form" id="admin-form"><div class="form-grid"><div class="form-field"><label for="admin-name">Ім’я та прізвище</label><input id="admin-name" name="name" placeholder="Наприклад, Марія Бондар" required /></div><div class="form-field"><label for="admin-email">Email для входу</label><input id="admin-email" name="email" type="email" placeholder="name@salon.ua" autocomplete="username" required /></div><div class="form-field"><label for="admin-phone">Телефон</label><input id="admin-phone" name="phone" placeholder="+38 ..." /></div><div class="form-field"><label for="admin-branch">Основна філія</label><select id="admin-branch" name="branchId" required>${branchOptions}</select></div><div class="form-field full"><label for="admin-password">Пароль</label><input id="admin-password" name="password" type="password" minlength="6" autocomplete="new-password" placeholder="Мінімум 6 символів" required /></div></div><div class="modal-actions"><button class="ghost-button" data-close-modal type="button">Скасувати</button><button class="primary-button" type="submit"><span>＋</span> Додати адміністратора</button></div></form>`;
+  showModal();
+}
+
+async function deleteAdmin(adminId) {
+  if (state.role !== "admin") return;
+  const admin = (demoUsers.admin || []).find((item) => item.id === adminId);
+  if (!admin || admin.id === state.user?.id) {
+    showToast("Не можна видалити власний обліковий запис.");
+    return;
+  }
+  if (!window.confirm(`Видалити адміністратора «${admin.name}»? Дію не можна скасувати.`)) return;
+  try {
+    if (apiReady) await apiRequest(`/admins/${encodeURIComponent(adminId)}`, { method: "DELETE" });
+    demoUsers.admin = (demoUsers.admin || []).filter((item) => item.id !== adminId);
+    await refreshLoginUsers().catch(() => {});
+    render();
+    showToast(`Адміністратора «${admin.name}» видалено.`);
+  } catch (error) {
+    showToast(`Не вдалося видалити адміністратора: ${apiErrorMessage(error)}`);
+  }
+}
+
+async function fileToPhotoData(file) {
+  if (!file || !file.size) return "";
+  if (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+    throw { error: "Оберіть JPEG, PNG, WebP або GIF." };
+  }
+  if (file.size > 8 * 1024 * 1024) throw { error: "Фото завелике. Оберіть файл до 8 МБ." };
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Не вдалося прочитати фото."));
+      element.src = objectUrl;
+    });
+    const maxEdge = 480;
+    const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+    let quality = 0.82;
+    let result = canvas.toDataURL("image/jpeg", quality);
+    while (result.length > 700_000 && quality > 0.5) {
+      quality -= 0.08;
+      result = canvas.toDataURL("image/jpeg", quality);
+    }
+    if (result.length > 700_000) throw { error: "Не вдалося стиснути фото до допустимого розміру." };
+    return result;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function selectOptions(items, selected, label = (item) => item.name) {
   return items.map((item) => `<option value="${escapeHtml(item.name)}" ${item.name === selected ? "selected" : ""}>${escapeHtml(label(item))}</option>`).join("");
 }
@@ -1009,7 +1096,8 @@ function openDirectoryModal(entity, id = "", preserveProcedureDraft = false) {
   const subheading = { master: "Після створення майстер отримає окремий вхід у систему.", room: "Кабінет буде доступний у маршрутах процедур та розкладі.", equipment: "Обладнання можна прив’язати до будь-якого наявного кабінету.", procedure: "Налаштуйте послідовність етапів, майстрів, кабінетів і обладнання." }[entity];
   let body = "";
   if (entity === "master") {
-    body = `<div class="form-grid"><div class="form-field"><label for="directory-name">Ім’я та прізвище</label><input id="directory-name" name="name" value="${escapeHtml(existing?.name || "")}" ${editing ? "readonly" : ""} required /></div><div class="form-field"><label for="directory-role">Спеціалізація</label><input id="directory-role" name="role" value="${escapeHtml(existing?.role || "Косметологиня")}" required /></div><div class="form-field"><label for="directory-email">Email для входу</label><input id="directory-email" name="email" type="email" value="${escapeHtml(existing?.email || "")}" ${editing ? "" : "required"} autocomplete="username" /></div><div class="form-field"><label for="directory-phone">Телефон</label><input id="directory-phone" name="phone" value="${escapeHtml(existing?.phone || "")}" /></div><div class="form-field"><label for="directory-schedule">Графік</label><input id="directory-schedule" name="schedule" value="${escapeHtml(existing?.schedule || "09:00–18:00")}" placeholder="09:00–18:00" required /></div><div class="form-field"><label for="directory-color">Колір у розкладі</label><select id="directory-color" name="color"><option value="peach" ${existing?.color === "peach" ? "selected" : ""}>Теплий</option><option value="lilac" ${existing?.color === "lilac" ? "selected" : ""}>Ліловий</option><option value="sage" ${existing?.color === "sage" ? "selected" : ""}>Шавлія</option></select></div><div class="form-field full"><label for="directory-focus">Фокус роботи</label><input id="directory-focus" name="focus" value="${escapeHtml(existing?.focus || "")}" placeholder="Наприклад, LED і доглядові процедури" required /></div><div class="form-field full"><label for="directory-photo">URL фото</label><input id="directory-photo" name="photo" value="${escapeHtml(existing?.photo || "")}" placeholder="https://..." /></div><div class="form-field full"><label for="directory-password">Пароль ${editing ? "(залиште порожнім, щоб не змінювати)" : "для входу"}</label><input id="directory-password" name="password" type="password" minlength="6" ${editing ? "" : "required"} autocomplete="new-password" placeholder="Мінімум 6 символів" /></div></div>`;
+    const currentPhoto = existing?.photo ? `<img src="${escapeHtml(existing.photo)}" alt="Поточне фото" onerror="this.hidden=true;this.nextElementSibling.hidden=false" /><span hidden>Без фото</span>` : `<span>Без фото</span>`;
+    body = `<div class="form-grid"><div class="form-field"><label for="directory-name">Ім’я та прізвище</label><input id="directory-name" name="name" value="${escapeHtml(existing?.name || "")}" ${editing ? "readonly" : ""} required /></div><div class="form-field"><label for="directory-role">Спеціалізація</label><input id="directory-role" name="role" value="${escapeHtml(existing?.role || "Косметологиня")}" required /></div><div class="form-field"><label for="directory-email">Email для входу</label><input id="directory-email" name="email" type="email" value="${escapeHtml(existing?.email || "")}" ${editing ? "" : "required"} autocomplete="username" /></div><div class="form-field"><label for="directory-phone">Телефон</label><input id="directory-phone" name="phone" value="${escapeHtml(existing?.phone || "")}" /></div><div class="form-field"><label for="directory-schedule">Графік</label><input id="directory-schedule" name="schedule" value="${escapeHtml(existing?.schedule || "09:00–18:00")}" placeholder="09:00–18:00" required /></div><div class="form-field"><label for="directory-color">Колір у розкладі</label><select id="directory-color" name="color"><option value="peach" ${existing?.color === "peach" ? "selected" : ""}>Теплий</option><option value="lilac" ${existing?.color === "lilac" ? "selected" : ""}>Ліловий</option><option value="sage" ${existing?.color === "sage" ? "selected" : ""}>Шавлія</option></select></div><div class="form-field full"><label for="directory-focus">Фокус роботи</label><input id="directory-focus" name="focus" value="${escapeHtml(existing?.focus || "")}" placeholder="Наприклад, LED і доглядові процедури" required /></div><div class="form-field full photo-upload-field"><div class="photo-upload-preview" id="directory-photo-preview">${currentPhoto}</div><div><label for="directory-photo-file">Фото співробітника</label><input id="directory-photo-file" name="photoFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif" /><small>Завантажте фото з пристрою — воно автоматично стиснеться перед збереженням.</small></div></div><div class="form-field full"><label for="directory-password">Пароль ${editing ? "(залиште порожнім, щоб не змінювати)" : "для входу"}</label><input id="directory-password" name="password" type="password" minlength="6" ${editing ? "" : "required"} autocomplete="new-password" placeholder="Мінімум 6 символів" /></div></div>`;
   } else if (entity === "room") {
     body = `<div class="form-grid"><div class="form-field"><label for="directory-name">Назва кабінету</label><input id="directory-name" name="name" value="${escapeHtml(existing?.name || "")}" ${editing ? "readonly" : ""} placeholder="Каб. 4" required /></div><div class="form-field"><label for="directory-type">Призначення</label><input id="directory-type" name="type" value="${escapeHtml(existing?.type || "")}" placeholder="Естетика" required /></div><div class="form-field"><label for="directory-status">Статус</label><select id="directory-status" name="status">${["Вільний", "До 10:20", "На обслуговуванні"].map((status) => `<option ${status === (existing?.status || "Вільний") ? "selected" : ""}>${status}</option>`).join("")}</select></div><div class="form-field full"><label for="directory-detail">Оснащення / примітка</label><input id="directory-detail" name="detail" value="${escapeHtml(existing?.detail || "")}" placeholder="Кушетка · лампа" /></div></div>`;
   } else if (entity === "equipment") {
@@ -1070,7 +1158,7 @@ function renderDirectory(section) {
     team: ["Команда", "Графіки майстрів визначають доступні вікна запису."]
   }[section];
   const action = section === "team"
-    ? `${state.role === "admin" ? `<button class="ghost-button" data-action="add-master" type="button"><span>＋</span> Додати майстра</button>` : ""}<button class="primary-button" data-action="add-availability" type="button"><span>＋</span> Неробочий час</button>`
+    ? `${state.role === "admin" ? `<button class="ghost-button" data-action="add-master" type="button"><span>＋</span> Додати майстра</button><button class="ghost-button" data-action="add-admin" type="button"><span>＋</span> Додати адміністратора</button>` : ""}<button class="primary-button" data-action="add-availability" type="button"><span>＋</span> Неробочий час</button>`
       : section === "resources" ? (state.role === "admin" ? `<button class="primary-button" data-action="add-room" type="button"><span>＋</span> Додати кабінет</button>` : "")
         : ["procedures"].includes(section) && state.role !== "admin" ? "" : `<button class="primary-button" data-action="add-${section === "procedures" ? "procedure" : section}" type="button"><span>＋</span> Додати</button>`;
   return `<section class="directory-view"><div class="management-head"><div><div class="panel-kicker">Довідник студії</div><h2 class="panel-title">${titles[0]}</h2><p class="panel-subtitle">${titles[1]}</p></div>${action}</div>${section === "procedures" ? renderProcedures() : section === "resources" ? renderResources() : section === "team" ? renderTeam() : section === "clients" ? renderClients() : renderHistory()}</section>`;
@@ -1087,7 +1175,9 @@ function renderResources() {
 function renderTeam() {
   const visibleSlots = getEditableUnavailableSlots().filter((slot) => slot.date === state.selectedDate);
   const masterRows = state.role === "master" ? state.masters.filter((master) => master.name === getCurrentMasterName()) : state.masters;
-  return `<div class="directory-grid team-grid"><section class="panel resource-card"><div class="side-panel-head"><div><h2 class="side-panel-title">Майстри</h2><p class="panel-subtitle">${masterRows.length} ${masterRows.length === 1 ? "майстер" : "майстри"} у команді</p></div></div><div class="mini-list">${masterRows.length ? masterRows.map((master) => `<div class="mini-list-item directory-master-row"><div class="master-profile-photo">${renderMasterAvatar(master, "master-avatar-md")}</div><span class="mini-list-copy"><strong>${escapeHtml(master.name)}</strong><span>${escapeHtml(master.role)} · ${escapeHtml(master.focus)}</span></span><span class="tag">${escapeHtml(master.schedule)}</span>${state.role === "admin" ? `<span class="directory-actions"><button class="icon-button" data-directory-edit="master" data-directory-id="${escapeHtml(master.name)}" type="button" aria-label="Змінити майстра">✎</button><button class="icon-button directory-delete" data-directory-delete="master" data-directory-id="${escapeHtml(master.name)}" type="button" aria-label="Видалити майстра">×</button></span>` : ""}</div>`).join("") : `<div class="availability-empty"><strong>Поки немає майстрів</strong><span>Додайте першого майстра.</span></div>`}</div></section><section class="panel side-panel availability-panel"><div class="side-panel-head"><div><h2 class="side-panel-title">Неробочий час</h2><p class="panel-subtitle">${state.selectedDate === "2026-09-04" ? "04 вересня · сьогодні" : escapeHtml(state.selectedDate)}</p></div><span class="tag">${visibleSlots.length} ${visibleSlots.length === 1 ? "інтервал" : "інтервали"}</span></div>${visibleSlots.length ? `<div class="availability-list">${visibleSlots.map((slot) => `<div class="availability-row"><div class="availability-row-time">${escapeHtml(slot.start)}—${escapeHtml(slot.end)}</div><div class="availability-row-copy"><strong>${escapeHtml(slot.reason)}</strong><span>${renderMasterAvatar(slot.master, "master-avatar-xs")} ${escapeHtml(slot.master)}</span></div><button class="icon-button availability-edit" data-availability="${slot.id}" type="button" aria-label="Змінити неробочий час">✎</button></div>`).join("")}</div>` : `<div class="availability-empty"><strong>Немає заблокованих інтервалів</strong><span>Додайте перерву або час для відлучки.</span></div>`}<button class="ghost-button availability-add-secondary" data-action="add-availability" type="button"><span>＋</span> Додати інтервал</button></section><section class="panel side-panel"><div class="side-panel-head"><h2 class="side-panel-title">Графік сьогодні</h2><span class="verified">${masterRows.length} на зміні</span></div><div class="mini-list">${masterRows.map((master) => `<div class="mini-list-item">${renderMasterAvatar(master, "master-avatar-xs")}<span class="mini-list-copy"><strong>${escapeHtml(master.name)}</strong><span>${escapeHtml(master.schedule)} · ${state.bookings.filter((booking) => booking.date === state.selectedDate && booking.stages.some((stage) => stage.master === master.name)).length} записів</span></span></div>`).join("")}</div></section></div>`;
+  const admins = demoUsers.admin || [];
+  const adminPanel = state.role === "admin" ? `<section class="panel resource-card admin-panel"><div class="side-panel-head"><div><h2 class="side-panel-title">Адміністратори</h2><p class="panel-subtitle">${admins.length} ${admins.length === 1 ? "адміністратор" : "адміністратори"} мають доступ до системи</p></div><button class="side-panel-link" data-action="add-admin" type="button">＋ Додати</button></div><div class="mini-list">${admins.length ? admins.map((admin) => `<div class="mini-list-item directory-admin-row"><div class="avatar avatar-peach">${escapeHtml(admin.initials || initials(admin.name))}</div><span class="mini-list-copy"><strong>${escapeHtml(admin.name)}${admin.id === state.user?.id ? " · ви" : ""}</strong><span>${escapeHtml(admin.email)}${admin.phone ? ` · ${escapeHtml(admin.phone)}` : ""}</span></span><span class="tag">${escapeHtml(state.branches.find((branch) => branch.id === admin.branchId)?.name || "Філія")}</span><span class="directory-actions"><button class="icon-button directory-delete" data-admin-delete="${escapeHtml(admin.id)}" type="button" aria-label="Видалити адміністратора" ${admin.id === state.user?.id ? "disabled" : ""}>×</button></span></div>`).join("") : `<div class="availability-empty"><strong>Поки немає адміністраторів</strong><span>Додайте першого адміністратора.</span></div>`}</div></section>` : "";
+  return `<div class="directory-grid team-grid"><section class="panel resource-card"><div class="side-panel-head"><div><h2 class="side-panel-title">Майстри</h2><p class="panel-subtitle">${masterRows.length} ${masterRows.length === 1 ? "майстер" : "майстри"} у команді</p></div></div><div class="mini-list">${masterRows.length ? masterRows.map((master) => `<div class="mini-list-item directory-master-row"><div class="master-profile-photo">${renderMasterAvatar(master, "master-avatar-md")}</div><span class="mini-list-copy"><strong>${escapeHtml(master.name)}</strong><span>${escapeHtml(master.role)} · ${escapeHtml(master.focus)}</span></span><span class="tag">${escapeHtml(master.schedule)}</span>${state.role === "admin" ? `<span class="directory-actions"><button class="icon-button" data-directory-edit="master" data-directory-id="${escapeHtml(master.name)}" type="button" aria-label="Змінити майстра">✎</button><button class="icon-button directory-delete" data-directory-delete="master" data-directory-id="${escapeHtml(master.name)}" type="button" aria-label="Видалити майстра">×</button></span>` : ""}</div>`).join("") : `<div class="availability-empty"><strong>Поки немає майстрів</strong><span>Додайте першого майстра.</span></div>`}</div></section>${adminPanel}<section class="panel side-panel availability-panel"><div class="side-panel-head"><div><h2 class="side-panel-title">Неробочий час</h2><p class="panel-subtitle">${state.selectedDate === "2026-09-04" ? "04 вересня · сьогодні" : escapeHtml(state.selectedDate)}</p></div><span class="tag">${visibleSlots.length} ${visibleSlots.length === 1 ? "інтервал" : "інтервали"}</span></div>${visibleSlots.length ? `<div class="availability-list">${visibleSlots.map((slot) => `<div class="availability-row"><div class="availability-row-time">${escapeHtml(slot.start)}—${escapeHtml(slot.end)}</div><div class="availability-row-copy"><strong>${escapeHtml(slot.reason)}</strong><span>${renderMasterAvatar(slot.master, "master-avatar-xs")} ${escapeHtml(slot.master)}</span></div><button class="icon-button availability-edit" data-availability="${slot.id}" type="button" aria-label="Змінити неробочий час">✎</button></div>`).join("")}</div>` : `<div class="availability-empty"><strong>Немає заблокованих інтервалів</strong><span>Додайте перерву або час для відлучки.</span></div>`}<button class="ghost-button availability-add-secondary" data-action="add-availability" type="button"><span>＋</span> Додати інтервал</button></section><section class="panel side-panel"><div class="side-panel-head"><h2 class="side-panel-title">Графік сьогодні</h2><span class="verified">${masterRows.length} на зміні</span></div><div class="mini-list">${masterRows.map((master) => `<div class="mini-list-item">${renderMasterAvatar(master, "master-avatar-xs")}<span class="mini-list-copy"><strong>${escapeHtml(master.name)}</strong><span>${escapeHtml(master.schedule)} · ${state.bookings.filter((booking) => booking.date === state.selectedDate && booking.stages.some((stage) => stage.master === master.name)).length} записів</span></span></div>`).join("")}</div></section></div>`;
 }
 
 function renderClients() {
@@ -1428,6 +1518,11 @@ document.addEventListener("click", async (event) => {
     renderLoginScreen();
     return;
   }
+  const branchDeleteButton = event.target.closest("[data-branch-delete]");
+  if (branchDeleteButton) {
+    await deleteBranch(branchDeleteButton.dataset.branchDelete);
+    return;
+  }
   const branchSelectButton = event.target.closest("[data-branch-select]");
   if (branchSelectButton) {
     await switchBranch(branchSelectButton.dataset.branchSelect);
@@ -1451,6 +1546,11 @@ document.addEventListener("click", async (event) => {
   const directoryDeleteButton = event.target.closest("[data-directory-delete]");
   if (directoryDeleteButton) {
     await deleteDirectoryEntity(directoryDeleteButton.dataset.directoryDelete, directoryDeleteButton.dataset.directoryId);
+    return;
+  }
+  const adminDeleteButton = event.target.closest("[data-admin-delete]");
+  if (adminDeleteButton) {
+    await deleteAdmin(adminDeleteButton.dataset.adminDelete);
     return;
   }
   const availabilityButton = event.target.closest("[data-availability]");
@@ -1547,6 +1647,8 @@ document.addEventListener("click", async (event) => {
     showToast(`Процедуру «${procedure.name}» додано до візиту.`);
   } else if (action === "add-availability") {
     openAvailabilityModal();
+  } else if (action === "add-admin") {
+    openAdminModal();
   } else if (["add-master", "add-room", "add-equipment", "add-procedure"].includes(action)) {
     openDirectoryModal({ "add-master": "master", "add-room": "room", "add-equipment": "equipment", "add-procedure": "procedure" }[action]);
   } else if (action === "add-procedure-stage") {
@@ -1576,6 +1678,16 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (event.target.id === "directory-photo-file") {
+    const file = event.target.files?.[0];
+    const preview = $("#directory-photo-preview");
+    if (file && preview) {
+      const objectUrl = URL.createObjectURL(file);
+      preview.innerHTML = `<img src="${objectUrl}" alt="Попередній перегляд фото" />`;
+      preview.dataset.previewUrl = objectUrl;
+    }
+    return;
+  }
   if (event.target.id === "login-user" && authRoleDraft === "master") {
     const selected = event.target.selectedOptions[0];
     const branchId = selected?.dataset.branchId || "branch-podil";
@@ -1605,6 +1717,30 @@ document.addEventListener("submit", async (event) => {
   if (event.target.id === "login-form") {
     event.preventDefault();
     await loginFromForm(event.target);
+    return;
+  }
+  if (event.target.id === "admin-form") {
+    event.preventDefault();
+    if (state.role !== "admin") return;
+    const data = new FormData(event.target);
+    const payload = { name: data.get("name"), email: data.get("email"), phone: data.get("phone"), branchId: data.get("branchId"), password: data.get("password") };
+    try {
+      let admin = { ...payload, id: `admin-${Date.now()}`, role: "admin", initials: initials(String(payload.name)) };
+      if (apiReady) {
+        const response = await apiRequest("/admins", { method: "POST", body: JSON.stringify(payload) });
+        admin = response.admin;
+        await refreshLoginUsers();
+      } else {
+        demoUsers.admin.push(admin);
+        demoPasswords[admin.id] = payload.password;
+      }
+      if (!apiReady) demoUsers.admin = [...demoUsers.admin];
+      closeModal();
+      render();
+      showToast(`Адміністратора «${admin.name}» додано.`);
+    } catch (error) {
+      showToast(`Не вдалося додати адміністратора: ${apiErrorMessage(error)}`);
+    }
     return;
   }
   if (event.target.id === "branch-create-form") {
@@ -1676,7 +1812,11 @@ document.addEventListener("submit", async (event) => {
     const data = new FormData(form);
     let payload = {};
     if (entity === "master") {
-      payload = { name: data.get("name"), role: data.get("role"), email: data.get("email"), phone: data.get("phone"), schedule: data.get("schedule"), color: data.get("color"), focus: data.get("focus"), photo: data.get("photo"), password: data.get("password") };
+      const currentMaster = state.masters.find((item) => item.name === id);
+      let photo = currentMaster?.photo || "";
+      const photoFile = data.get("photoFile");
+      if (photoFile && photoFile.size) photo = await fileToPhotoData(photoFile);
+      payload = { name: data.get("name"), role: data.get("role"), email: data.get("email"), phone: data.get("phone"), schedule: data.get("schedule"), color: data.get("color"), focus: data.get("focus"), photo, password: data.get("password") };
     } else if (entity === "room") {
       payload = { name: data.get("name"), type: data.get("type"), status: data.get("status"), detail: data.get("detail") };
     } else if (entity === "equipment") {

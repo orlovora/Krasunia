@@ -412,7 +412,6 @@ function renderLoginScreen(errorMessage = "") {
       <div class="auth-field"><label for="login-user">Користувач</label><select id="login-user" name="userId" required>${userOptions}</select></div>
       ${branchField}
       <div class="auth-field"><label for="login-password">Пароль</label><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Введіть пароль" required /></div>
-      <p class="auth-password-note">Для локального демо використовуйте пароль <strong>demo123</strong>.</p>
       ${errorMessage ? `<div class="auth-error" role="alert">${escapeHtml(errorMessage)}</div>` : ""}
       <button class="primary-button auth-submit" type="submit">Увійти в Красуня <span>→</span></button>
     </form>

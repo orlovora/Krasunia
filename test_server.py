@@ -103,6 +103,11 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(branch["city"], "Київ")
         self.assertIsNotNone(self.connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch["id"],)).fetchone())
 
+    def test_login_session_includes_created_branch(self):
+        branch = server.create_branch(self.connection, {"name": "Центр", "city": "Київ", "address": "вул. Хрещатик, 1"})
+        session = server.auth_session_payload(self.connection, None)
+        self.assertIn(branch["id"], [item["id"] for item in session["branches"]])
+
     def test_admin_can_create_and_delete_another_admin(self):
         admin = server.create_admin(self.connection, {"name": "Марія Бондар", "email": "maria@krasunya.local", "phone": "+38 067 000 00 10", "branchId": "branch-pechersk", "password": "secret1"}, "branch-podil")
         self.assertEqual(admin["role"], "admin")

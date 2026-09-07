@@ -149,6 +149,24 @@ const demoUsers = {
   client: [{ id: "client-001-user", name: "Марина Соколова", role: "client", initials: "МС", email: "marina@krasunya.local" }]
 };
 const demoPasswords = { "admin-001": "demo123", "master-001": "demo123", "client-001-user": "demo123" };
+const BRANCHES_STORAGE_KEY = "krasunya-branches-cache";
+
+function readCachedBranches() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(BRANCHES_STORAGE_KEY) || "[]");
+    return Array.isArray(cached) ? cached : [];
+  } catch {
+    return [];
+  }
+}
+
+function cacheBranches(branches) {
+  try {
+    localStorage.setItem(BRANCHES_STORAGE_KEY, JSON.stringify(branches));
+  } catch {
+    // Storage may be unavailable in private browsing or embedded previews.
+  }
+}
 
 function apiErrorMessage(error) {
   if (error?.details?.length) return error.details[0];
@@ -169,7 +187,10 @@ async function loadPersistentState() {
   try {
     const session = await apiRequest("/auth/session");
     apiAvailable = true;
-    if (Array.isArray(session.branches)) state.branches = session.branches;
+    if (Array.isArray(session.branches)) {
+      state.branches = session.branches;
+      cacheBranches(state.branches);
+    }
     if (session.users) Object.assign(demoUsers, session.users);
     if (!session.authenticated) {
       state.authenticated = false;
@@ -181,6 +202,7 @@ async function loadPersistentState() {
     ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots", "branches"].forEach((key) => {
       if (Array.isArray(payload[key])) state[key] = payload[key];
     });
+    cacheBranches(state.branches);
     apiReady = true;
     if (payload.session) applySessionUser(payload.session);
     render();
@@ -196,7 +218,10 @@ async function refreshLoginUsers() {
   if (!apiAvailable) return;
   const session = await apiRequest("/auth/session");
   if (session.users) Object.assign(demoUsers, session.users);
-  if (Array.isArray(session.branches)) state.branches = session.branches;
+  if (Array.isArray(session.branches)) {
+    state.branches = session.branches;
+    cacheBranches(state.branches);
+  }
 }
 
 async function reloadBootstrap() {
@@ -205,6 +230,7 @@ async function reloadBootstrap() {
   ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots", "branches"].forEach((key) => {
     if (Array.isArray(payload[key])) state[key] = payload[key];
   });
+  cacheBranches(state.branches);
   if (payload.session && state.user) {
     state.user = { ...state.user, ...payload.session };
     state.role = state.user.role;
@@ -406,12 +432,16 @@ async function loginFromForm(form) {
   try {
     if (apiAvailable) {
       const response = await apiRequest("/auth/login", { method: "POST", body: JSON.stringify(payload) });
-      if (Array.isArray(response.branches)) state.branches = response.branches;
+      if (Array.isArray(response.branches)) {
+        state.branches = response.branches;
+        cacheBranches(state.branches);
+      }
       applySessionUser(response.user);
       const bootstrap = await apiRequest("/bootstrap");
       ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots", "branches"].forEach((key) => {
         if (Array.isArray(bootstrap[key])) state[key] = bootstrap[key];
       });
+      cacheBranches(state.branches);
       if (bootstrap.session) applySessionUser(bootstrap.session);
       apiReady = true;
     } else {
@@ -454,12 +484,14 @@ async function closeBranch(branchId) {
       const response = await apiRequest(`/branches/${encodeURIComponent(branchId)}/close`, { method: "POST" });
       if (response.branch) {
         state.branches = state.branches.map((item) => item.id === branchId ? response.branch : item);
+        cacheBranches(state.branches);
       }
       await reloadBootstrap();
       await refreshLoginUsers();
     } else {
       const closedAt = new Date().toISOString();
       state.branches = state.branches.map((item) => item.id === branchId ? { ...item, status: "closed", closedAt, isClosed: true } : item);
+      cacheBranches(state.branches);
       for (const key of ["bookings", "rooms", "equipment", "unavailableSlots"]) {
         state[key] = state[key].map((item) => item.branchId === branchId ? { ...item, archived: true } : item);
       }
@@ -486,6 +518,7 @@ async function deleteBranch(branchId) {
   try {
     if (apiReady) await apiRequest(`/branches/${encodeURIComponent(branchId)}`, { method: "DELETE" });
     state.branches = state.branches.filter((item) => item.id !== branchId);
+    cacheBranches(state.branches);
     if (branch.id === state.branchId) {
       state.branchId = fallbackBranch.id;
       if (state.user) state.user.branchId = fallbackBranch.id;
@@ -516,6 +549,7 @@ async function switchBranch(branchId) {
       ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots", "branches"].forEach((key) => {
         if (Array.isArray(bootstrap[key])) state[key] = bootstrap[key];
       });
+      cacheBranches(state.branches);
       if (bootstrap.session) applySessionUser(bootstrap.session);
     } else {
       state.branchId = branchId;
@@ -2024,6 +2058,7 @@ document.addEventListener("submit", async (event) => {
         branch = response.branch;
       }
       state.branches.push(branch);
+      cacheBranches(state.branches);
       await switchBranch(branch.id);
       showToast(`Філію «${branch.name}» створено.`);
     } catch (error) {
@@ -2283,5 +2318,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+const cachedBranches = readCachedBranches();
+if (cachedBranches.length) state.branches = cachedBranches;
 render();
 loadPersistentState();

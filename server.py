@@ -42,6 +42,8 @@ SALON_END = "19:00"
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 DEMO_PASSWORD = "demo123"
 ACTIVE_BOOKING_STATUSES = {"booked", "confirmed"}
+OPEN_BRANCH_STATUS = "open"
+CLOSED_BRANCH_STATUS = "closed"
 SESSIONS: dict[str, str] = {}
 MAX_PHOTO_DATA_LENGTH = 700_000
 PHOTO_DATA_RE = re.compile(r"^data:image/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=\s]+$")
@@ -281,34 +283,34 @@ def migrate_resource_primary_keys(connection: sqlite3.Connection | PostgresConne
         connection.execute("INSERT INTO masters_new (name, branch_id, role, initials, color, schedule, focus, photo) SELECT name, branch_id, role, initials, color, schedule, focus, photo FROM masters")
         connection.execute("DROP TABLE masters")
         connection.execute("ALTER TABLE masters_new RENAME TO masters")
-        connection.execute("CREATE TABLE rooms_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), type TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, PRIMARY KEY (name, branch_id))")
-        connection.execute("INSERT INTO rooms_new (name, branch_id, type, status, detail) SELECT name, branch_id, type, status, detail FROM rooms")
+        connection.execute("CREATE TABLE rooms_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), type TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (name, branch_id))")
+        connection.execute("INSERT INTO rooms_new (name, branch_id, type, status, detail, archived) SELECT name, branch_id, type, status, detail, archived FROM rooms")
         connection.execute("DROP TABLE rooms")
         connection.execute("ALTER TABLE rooms_new RENAME TO rooms")
-        connection.execute("CREATE TABLE equipment_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), type TEXT NOT NULL, room TEXT NOT NULL, status TEXT NOT NULL, PRIMARY KEY (name, branch_id))")
-        connection.execute("INSERT INTO equipment_new (name, branch_id, type, room, status) SELECT name, branch_id, type, room, status FROM equipment")
+        connection.execute("CREATE TABLE equipment_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), type TEXT NOT NULL, room TEXT NOT NULL, status TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (name, branch_id))")
+        connection.execute("INSERT INTO equipment_new (name, branch_id, type, room, status, archived) SELECT name, branch_id, type, room, status, archived FROM equipment")
         connection.execute("DROP TABLE equipment")
         connection.execute("ALTER TABLE equipment_new RENAME TO equipment")
         connection.execute("ALTER TABLE unavailable_slots ADD CONSTRAINT unavailable_slots_master_branch_id_fkey FOREIGN KEY (master, branch_id) REFERENCES masters(name, branch_id)")
         return
 
     connection.execute("PRAGMA foreign_keys = OFF")
-    connection.execute("CREATE TABLE unavailable_slots_backup AS SELECT id, date, branch_id, master, start, \"end\", reason, created_by FROM unavailable_slots")
+    connection.execute("CREATE TABLE unavailable_slots_backup AS SELECT id, date, branch_id, master, start, \"end\", reason, created_by, archived FROM unavailable_slots")
     connection.execute("DROP TABLE unavailable_slots")
     connection.execute("CREATE TABLE masters_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), role TEXT NOT NULL, initials TEXT NOT NULL, color TEXT NOT NULL, schedule TEXT NOT NULL, focus TEXT NOT NULL, photo TEXT NOT NULL DEFAULT '', PRIMARY KEY (name, branch_id))")
     connection.execute("INSERT INTO masters_new (name, branch_id, role, initials, color, schedule, focus, photo) SELECT name, branch_id, role, initials, color, schedule, focus, photo FROM masters")
     connection.execute("DROP TABLE masters")
     connection.execute("ALTER TABLE masters_new RENAME TO masters")
-    connection.execute("CREATE TABLE rooms_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), type TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, PRIMARY KEY (name, branch_id))")
-    connection.execute("INSERT INTO rooms_new (name, branch_id, type, status, detail) SELECT name, branch_id, type, status, detail FROM rooms")
+    connection.execute("CREATE TABLE rooms_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), type TEXT NOT NULL, status TEXT NOT NULL, detail TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (name, branch_id))")
+    connection.execute("INSERT INTO rooms_new (name, branch_id, type, status, detail, archived) SELECT name, branch_id, type, status, detail, archived FROM rooms")
     connection.execute("DROP TABLE rooms")
     connection.execute("ALTER TABLE rooms_new RENAME TO rooms")
-    connection.execute("CREATE TABLE equipment_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), type TEXT NOT NULL, room TEXT NOT NULL, status TEXT NOT NULL, PRIMARY KEY (name, branch_id))")
-    connection.execute("INSERT INTO equipment_new (name, branch_id, type, room, status) SELECT name, branch_id, type, room, status FROM equipment")
+    connection.execute("CREATE TABLE equipment_new (name TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), type TEXT NOT NULL, room TEXT NOT NULL, status TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (name, branch_id))")
+    connection.execute("INSERT INTO equipment_new (name, branch_id, type, room, status, archived) SELECT name, branch_id, type, room, status, archived FROM equipment")
     connection.execute("DROP TABLE equipment")
     connection.execute("ALTER TABLE equipment_new RENAME TO equipment")
-    connection.execute("CREATE TABLE unavailable_slots (id TEXT PRIMARY KEY, date TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), master TEXT NOT NULL, start TEXT NOT NULL, \"end\" TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, FOREIGN KEY (master, branch_id) REFERENCES masters(name, branch_id))")
-    connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, \"end\", reason, created_by) SELECT id, date, branch_id, master, start, \"end\", reason, created_by FROM unavailable_slots_backup")
+    connection.execute("CREATE TABLE unavailable_slots (id TEXT PRIMARY KEY, date TEXT NOT NULL, branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id), master TEXT NOT NULL, start TEXT NOT NULL, \"end\" TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (master, branch_id) REFERENCES masters(name, branch_id))")
+    connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, \"end\", reason, created_by, archived) SELECT id, date, branch_id, master, start, \"end\", reason, created_by, archived FROM unavailable_slots_backup")
     connection.execute("DROP TABLE unavailable_slots_backup")
     connection.execute("CREATE INDEX IF NOT EXISTS unavailable_date_master_idx ON unavailable_slots(date, master)")
     connection.execute("PRAGMA foreign_keys = ON")
@@ -335,7 +337,9 @@ def init_db() -> None:
               address TEXT NOT NULL,
               phone TEXT NOT NULL,
               hours_start TEXT NOT NULL,
-              hours_end TEXT NOT NULL
+              hours_end TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'open',
+              closed_at TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS users (
               id TEXT PRIMARY KEY,
@@ -366,6 +370,7 @@ def init_db() -> None:
               type TEXT NOT NULL,
               status TEXT NOT NULL,
               detail TEXT NOT NULL,
+              archived INTEGER NOT NULL DEFAULT 0,
               PRIMARY KEY (name, branch_id)
             );
             CREATE TABLE IF NOT EXISTS equipment (
@@ -374,6 +379,7 @@ def init_db() -> None:
               type TEXT NOT NULL,
               room TEXT NOT NULL,
               status TEXT NOT NULL,
+              archived INTEGER NOT NULL DEFAULT 0,
               PRIMARY KEY (name, branch_id)
             );
             CREATE TABLE IF NOT EXISTS procedures (
@@ -402,7 +408,8 @@ def init_db() -> None:
               status TEXT NOT NULL,
               stages_json TEXT NOT NULL,
               created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL
+              updated_at TEXT NOT NULL,
+              archived INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS bookings_date_idx ON bookings(date);
             CREATE TABLE IF NOT EXISTS unavailable_slots (
@@ -414,6 +421,7 @@ def init_db() -> None:
               "end" TEXT NOT NULL,
               reason TEXT NOT NULL DEFAULT '',
               created_by TEXT NOT NULL,
+              archived INTEGER NOT NULL DEFAULT 0,
               FOREIGN KEY (master, branch_id) REFERENCES masters(name, branch_id)
             );
             CREATE INDEX IF NOT EXISTS unavailable_date_master_idx ON unavailable_slots(date, master);
@@ -425,12 +433,19 @@ def init_db() -> None:
             );
             """
         )
-        for table in ("masters", "rooms", "equipment", "procedures", "bookings", "unavailable_slots"):
+        for table in ("branches", "masters", "rooms", "equipment", "procedures", "bookings", "unavailable_slots"):
             columns = table_columns(connection, table)
-            if "branch_id" not in columns:
+            if table != "branches" and "branch_id" not in columns:
                 connection.execute(f"ALTER TABLE {table} ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'branch-podil'")
+            if table == "branches":
+                if "status" not in columns:
+                    connection.execute("ALTER TABLE branches ADD COLUMN status TEXT NOT NULL DEFAULT 'open'")
+                if "closed_at" not in columns:
+                    connection.execute("ALTER TABLE branches ADD COLUMN closed_at TEXT NOT NULL DEFAULT ''")
+            elif table in ("rooms", "equipment", "bookings", "unavailable_slots") and "archived" not in columns:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         for branch in BRANCHES_SEED:
-            connection.execute("INSERT OR IGNORE INTO branches VALUES (?, ?, ?, ?, ?, ?, ?)", (branch["id"], branch["name"], branch["city"], branch["address"], branch["phone"], branch["hoursStart"], branch["hoursEnd"]))
+            connection.execute("INSERT OR IGNORE INTO branches (id, name, city, address, phone, hours_start, hours_end) VALUES (?, ?, ?, ?, ?, ?, ?)", (branch["id"], branch["name"], branch["city"], branch["address"], branch["phone"], branch["hoursStart"], branch["hoursEnd"]))
         migrate_resource_primary_keys(connection)
         if connection.execute("SELECT COUNT(*) FROM clients").fetchone()[0] == 0:
             seed_db(connection)
@@ -470,6 +485,7 @@ def row_booking(row: sqlite3.Row) -> dict[str, Any]:
     item["branchId"] = item.pop("branch_id")
     item["clientId"] = item.pop("client_id")
     item["stages"] = json.loads(item.pop("stages_json"))
+    item["archived"] = bool(item.get("archived", 0))
     item.pop("created_at", None)
     item.pop("updated_at", None)
     return item
@@ -479,6 +495,7 @@ def row_slot(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     item["branchId"] = item.pop("branch_id")
     item["createdBy"] = item.pop("created_by")
+    item["archived"] = bool(item.get("archived", 0))
     return item
 
 
@@ -486,13 +503,26 @@ def row_branch(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     item["hoursStart"] = item.pop("hours_start")
     item["hoursEnd"] = item.pop("hours_end")
+    item["status"] = item.pop("status", OPEN_BRANCH_STATUS)
+    item["closedAt"] = item.pop("closed_at", "")
+    item["isClosed"] = item["status"] == CLOSED_BRANCH_STATUS
     return item
 
 
 def row_branch_resource(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     item["branchId"] = item.pop("branch_id", "branch-podil")
+    if "archived" in item:
+        item["archived"] = bool(item["archived"])
     return item
+
+
+def ensure_branch_open(connection: sqlite3.Connection, branch_id: str) -> None:
+    branch = connection.execute("SELECT status FROM branches WHERE id = ?", (branch_id,)).fetchone()
+    if not branch:
+        raise ApiError("Філію не знайдено.", 404)
+    if branch["status"] == CLOSED_BRANCH_STATUS:
+        raise ApiError("Філія закрита. Нові операції в архіві недоступні.", 409)
 
 
 def row_user(row: sqlite3.Row) -> dict[str, Any]:
@@ -610,8 +640,11 @@ def login_user(connection: sqlite3.Connection, payload: dict[str, Any]) -> tuple
     if not user or user["password_hash"] != password_hash(str(payload.get("password") or "")):
         raise ApiError("Невірна роль, користувач або пароль.", 401)
     branch_id = str(payload.get("branchId") or user["branch_id"])
-    if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
+    branch = connection.execute("SELECT status FROM branches WHERE id = ?", (branch_id,)).fetchone()
+    if not branch:
         raise ApiError("Оберіть існуючу філію.", 422)
+    if branch["status"] == CLOSED_BRANCH_STATUS and role != "admin":
+        raise ApiError("Ця філія закрита й доступна лише адміністратору для перегляду архіву.", 403)
     if role == "master" and branch_id != user["branch_id"]:
         raise ApiError("Майстер може увійти лише до своєї філії.", 403)
     token = secrets.token_urlsafe(32)
@@ -635,9 +668,27 @@ def create_branch(connection: sqlite3.Connection, payload: dict[str, Any]) -> di
     parse_minutes(hours_end)
     if parse_minutes(hours_start) >= parse_minutes(hours_end):
         raise ApiError("Час завершення має бути пізніше початку.", 422)
-    branch = {"id": f"branch-{uuid.uuid4().hex[:10]}", "name": name, "city": city, "address": address, "phone": phone, "hoursStart": hours_start, "hoursEnd": hours_end}
-    connection.execute("INSERT INTO branches VALUES (?, ?, ?, ?, ?, ?, ?)", (branch["id"], branch["name"], branch["city"], branch["address"], branch["phone"], branch["hoursStart"], branch["hoursEnd"]))
+    branch = {"id": f"branch-{uuid.uuid4().hex[:10]}", "name": name, "city": city, "address": address, "phone": phone, "hoursStart": hours_start, "hoursEnd": hours_end, "status": OPEN_BRANCH_STATUS, "closedAt": "", "isClosed": False}
+    connection.execute("INSERT INTO branches (id, name, city, address, phone, hours_start, hours_end, status, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (branch["id"], branch["name"], branch["city"], branch["address"], branch["phone"], branch["hoursStart"], branch["hoursEnd"], branch["status"], branch["closedAt"]))
     return branch
+
+
+def close_branch(connection: sqlite3.Connection, branch_id: str) -> dict[str, Any]:
+    branch = connection.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone()
+    if not branch:
+        raise ApiError("Філію не знайдено.", 404)
+    if branch["status"] == CLOSED_BRANCH_STATUS:
+        raise ApiError("Філія вже закрита.", 409)
+    closed_at = now_iso()
+    connection.execute("UPDATE branches SET status = ?, closed_at = ? WHERE id = ?", (CLOSED_BRANCH_STATUS, closed_at, branch_id))
+    connection.execute("UPDATE bookings SET archived = 1 WHERE branch_id = ?", (branch_id,))
+    connection.execute("UPDATE rooms SET archived = 1 WHERE branch_id = ?", (branch_id,))
+    connection.execute("UPDATE equipment SET archived = 1 WHERE branch_id = ?", (branch_id,))
+    connection.execute("UPDATE unavailable_slots SET archived = 1 WHERE branch_id = ?", (branch_id,))
+    # Existing master and client sessions must not keep writing to a closed
+    # branch. Administrators retain read access to its archive.
+    connection.execute("DELETE FROM sessions WHERE branch_id = ? AND user_id IN (SELECT id FROM users WHERE role != 'admin')", (branch_id,))
+    return row_branch(connection.execute("SELECT * FROM branches WHERE id = ?", (branch_id,)).fetchone())
 
 
 def create_admin(connection: sqlite3.Connection, payload: dict[str, Any], default_branch_id: str) -> dict[str, Any]:
@@ -652,6 +703,7 @@ def create_admin(connection: sqlite3.Connection, payload: dict[str, Any], defaul
         raise directory_error("Пароль адміністратора має містити щонайменше 6 символів.")
     if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
         raise directory_error("Оберіть існуючу філію.", 404)
+    ensure_branch_open(connection, branch_id)
     if connection.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
         raise directory_error("Користувач із таким email уже існує.", 409)
     user = {
@@ -789,6 +841,7 @@ def validate_photo(value: Any) -> str:
 
 
 def create_master(connection: sqlite3.Connection, payload: dict[str, Any], branch_id: str) -> dict[str, Any]:
+    ensure_branch_open(connection, branch_id)
     name = str(payload.get("name") or "").strip()
     role = str(payload.get("role") or "Майстер").strip()
     focus = str(payload.get("focus") or "").strip()
@@ -819,6 +872,7 @@ def create_master(connection: sqlite3.Connection, payload: dict[str, Any], branc
 
 
 def update_master(connection: sqlite3.Connection, master_name: str, payload: dict[str, Any], branch_id: str = "branch-podil") -> dict[str, Any]:
+    ensure_branch_open(connection, branch_id)
     current = connection.execute("SELECT * FROM masters WHERE name = ? AND branch_id = ?", (master_name, branch_id)).fetchone()
     if not current:
         raise ApiError("Майстра не знайдено.", 404)
@@ -872,6 +926,7 @@ def master_is_referenced(connection: sqlite3.Connection, master_name: str, branc
 
 
 def delete_master(connection: sqlite3.Connection, master_name: str, branch_id: str = "branch-podil") -> None:
+    ensure_branch_open(connection, branch_id)
     if not connection.execute("SELECT 1 FROM masters WHERE name = ? AND branch_id = ?", (master_name, branch_id)).fetchone():
         raise ApiError("Майстра не знайдено.", 404)
     if master_is_referenced(connection, master_name, branch_id):
@@ -891,6 +946,7 @@ def validate_room(payload: dict[str, Any], current: sqlite3.Row | None = None) -
 
 
 def create_room(connection: sqlite3.Connection, payload: dict[str, Any], branch_id: str = "branch-podil") -> dict[str, str]:
+    ensure_branch_open(connection, branch_id)
     room = validate_room(payload)
     if connection.execute("SELECT 1 FROM rooms WHERE name = ? AND branch_id = ?", (room["name"], branch_id)).fetchone():
         raise directory_error("Кабінет із такою назвою вже існує.", 409)
@@ -900,6 +956,7 @@ def create_room(connection: sqlite3.Connection, payload: dict[str, Any], branch_
 
 
 def update_room(connection: sqlite3.Connection, room_name: str, payload: dict[str, Any], branch_id: str = "branch-podil") -> dict[str, str]:
+    ensure_branch_open(connection, branch_id)
     current = connection.execute("SELECT * FROM rooms WHERE name = ? AND branch_id = ?", (room_name, branch_id)).fetchone()
     if not current:
         raise ApiError("Кабінет не знайдено.", 404)
@@ -910,6 +967,7 @@ def update_room(connection: sqlite3.Connection, room_name: str, payload: dict[st
 
 
 def delete_room(connection: sqlite3.Connection, room_name: str, branch_id: str = "branch-podil") -> None:
+    ensure_branch_open(connection, branch_id)
     if not connection.execute("SELECT 1 FROM rooms WHERE name = ? AND branch_id = ?", (room_name, branch_id)).fetchone():
         raise ApiError("Кабінет не знайдено.", 404)
     if connection.execute("SELECT 1 FROM equipment WHERE room = ? AND branch_id = ? LIMIT 1", (room_name, branch_id)).fetchone():
@@ -936,6 +994,7 @@ def validate_equipment(connection: sqlite3.Connection, payload: dict[str, Any], 
 
 
 def create_equipment(connection: sqlite3.Connection, payload: dict[str, Any], branch_id: str = "branch-podil") -> dict[str, str]:
+    ensure_branch_open(connection, branch_id)
     equipment = validate_equipment(connection, payload, branch_id=branch_id)
     if connection.execute("SELECT 1 FROM equipment WHERE name = ? AND branch_id = ?", (equipment["name"], branch_id)).fetchone():
         raise directory_error("Обладнання з такою назвою вже існує.", 409)
@@ -945,6 +1004,7 @@ def create_equipment(connection: sqlite3.Connection, payload: dict[str, Any], br
 
 
 def update_equipment(connection: sqlite3.Connection, equipment_name: str, payload: dict[str, Any], branch_id: str = "branch-podil") -> dict[str, str]:
+    ensure_branch_open(connection, branch_id)
     current = connection.execute("SELECT * FROM equipment WHERE name = ? AND branch_id = ?", (equipment_name, branch_id)).fetchone()
     if not current:
         raise ApiError("Обладнання не знайдено.", 404)
@@ -955,6 +1015,7 @@ def update_equipment(connection: sqlite3.Connection, equipment_name: str, payloa
 
 
 def delete_equipment(connection: sqlite3.Connection, equipment_name: str, branch_id: str = "branch-podil") -> None:
+    ensure_branch_open(connection, branch_id)
     if not connection.execute("SELECT 1 FROM equipment WHERE name = ? AND branch_id = ?", (equipment_name, branch_id)).fetchone():
         raise ApiError("Обладнання не знайдено.", 404)
     for row in connection.execute("SELECT stages_json FROM bookings WHERE branch_id = ?", (branch_id,)):
@@ -1018,6 +1079,7 @@ def validate_procedure(connection: sqlite3.Connection, payload: dict[str, Any], 
 
 
 def create_procedure(connection: sqlite3.Connection, payload: dict[str, Any], branch_id: str = "branch-podil") -> dict[str, Any]:
+    ensure_branch_open(connection, branch_id)
     procedure = validate_procedure(connection, payload, branch_id=branch_id)
     if connection.execute("SELECT 1 FROM procedures WHERE name = ? AND branch_id = ?", (procedure["name"], branch_id)).fetchone():
         raise directory_error("Процедура з такою назвою вже існує.", 409)
@@ -1028,6 +1090,7 @@ def create_procedure(connection: sqlite3.Connection, payload: dict[str, Any], br
 
 
 def update_procedure(connection: sqlite3.Connection, procedure_id: str, payload: dict[str, Any], branch_id: str = "branch-podil") -> dict[str, Any]:
+    ensure_branch_open(connection, branch_id)
     current = connection.execute("SELECT * FROM procedures WHERE id = ? AND branch_id = ?", (procedure_id, branch_id)).fetchone()
     if not current:
         raise ApiError("Процедуру не знайдено.", 404)
@@ -1041,6 +1104,7 @@ def update_procedure(connection: sqlite3.Connection, procedure_id: str, payload:
 
 
 def delete_procedure(connection: sqlite3.Connection, procedure_id: str, branch_id: str = "branch-podil") -> None:
+    ensure_branch_open(connection, branch_id)
     if not connection.execute("SELECT 1 FROM procedures WHERE id = ? AND branch_id = ?", (procedure_id, branch_id)).fetchone():
         raise ApiError("Процедуру не знайдено.", 404)
     connection.execute("DELETE FROM procedures WHERE id = ? AND branch_id = ?", (procedure_id, branch_id))
@@ -1066,6 +1130,7 @@ def validate_booking(connection: sqlite3.Connection, payload: dict[str, Any], ex
     branch_id = payload.get("branchId") or "branch-podil"
     if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
         raise ApiError("Філію не знайдено.", 404)
+    ensure_branch_open(connection, branch_id)
     stages = payload["stages"]
     if not isinstance(stages, list) or not stages:
         raise ApiError("Запис має містити хоча б один етап.")
@@ -1192,6 +1257,7 @@ def cancel_booking(connection: sqlite3.Connection, booking_id: str, branch_id: s
         current = connection.execute(query, args).fetchone()
         if not current:
             raise ApiError("Запис не знайдено.", 404)
+        ensure_branch_open(connection, current["branch_id"])
         if current["status"] == "cancelled":
             raise ApiError("Запис уже скасовано.", 409)
         connection.execute("UPDATE bookings SET status = ?, updated_at = ? WHERE id = ?", ("cancelled", now_iso(), booking_id))
@@ -1216,6 +1282,7 @@ def validate_slot(connection: sqlite3.Connection, payload: dict[str, Any], exclu
     if start < parse_minutes(SALON_START) or end > parse_minutes(SALON_END):
         raise ApiError(f"Інтервал має бути в межах {SALON_START}—{SALON_END}.")
     branch_id = payload.get("branchId") or "branch-podil"
+    ensure_branch_open(connection, branch_id)
     if not connection.execute("SELECT 1 FROM masters WHERE name = ? AND branch_id = ?", (payload["master"], branch_id)).fetchone():
         raise ApiError("Майстра не знайдено.", 404)
     if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
@@ -1251,6 +1318,7 @@ def update_slot(connection: sqlite3.Connection, slot_id: str, payload: dict[str,
         current = connection.execute("SELECT * FROM unavailable_slots WHERE id = ?", (slot_id,)).fetchone()
         if not current:
             raise ApiError("Неробочий інтервал не знайдено.", 404)
+        ensure_branch_open(connection, current["branch_id"])
         merged = {**row_slot(current), **payload, "id": slot_id}
         slot = validate_slot(connection, merged, excluded_id=slot_id)
         connection.execute("UPDATE unavailable_slots SET date=?, branch_id=?, master=?, start=?, \"end\"=?, reason=?, created_by=? WHERE id=?", (slot["date"], slot["branchId"], slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"], slot_id))
@@ -1264,6 +1332,10 @@ def update_slot(connection: sqlite3.Connection, slot_id: str, payload: dict[str,
 def delete_slot(connection: sqlite3.Connection, slot_id: str) -> None:
     begin_write(connection)
     try:
+        current = connection.execute("SELECT branch_id FROM unavailable_slots WHERE id = ?", (slot_id,)).fetchone()
+        if not current:
+            raise ApiError("Неробочий інтервал не знайдено.", 404)
+        ensure_branch_open(connection, current["branch_id"])
         result = connection.execute("DELETE FROM unavailable_slots WHERE id = ?", (slot_id,))
         if result.rowcount == 0:
             raise ApiError("Неробочий інтервал не знайдено.", 404)
@@ -1435,8 +1507,11 @@ class Handler(SimpleHTTPRequestHandler):
                     if user_data["role"] == "master":
                         raise ApiError("Майстер не може змінювати філію.", 403)
                     branch_id = str(payload.get("branchId") or "")
-                    if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
+                    branch = connection.execute("SELECT status FROM branches WHERE id = ?", (branch_id,)).fetchone()
+                    if not branch:
                         raise ApiError("Філію не знайдено.", 404)
+                    if branch["status"] == CLOSED_BRANCH_STATUS and user_data["role"] != "admin":
+                        raise ApiError("Ця філія закрита й недоступна для вибору.", 403)
                     connection.execute("UPDATE sessions SET branch_id = ? WHERE token = ?", (branch_id, token))
                     self.send_json(200, {"user": user_payload(user, branch_id)})
                 elif parts == ["api", "auth", "profile"] and method == "PATCH":
@@ -1453,6 +1528,18 @@ class Handler(SimpleHTTPRequestHandler):
                     if user_data["role"] != "admin":
                         raise ApiError("Тільки адміністратор може створювати філії.", 403)
                     self.send_json(201, {"branch": create_branch(connection, payload)})
+                elif len(parts) == 4 and parts[:2] == ["api", "branches"] and parts[3] == "close" and method == "POST":
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може закривати філії.", 403)
+                    begin_write(connection)
+                    try:
+                        branch = close_branch(connection, unquote(parts[2]))
+                        connection.commit()
+                    except Exception:
+                        connection.rollback()
+                        raise
+                    self.send_json(200, {"branch": branch})
                 elif parts == ["api", "admins"] and method == "POST":
                     _, _, user_data = require_user(self)
                     if user_data["role"] != "admin":

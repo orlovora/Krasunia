@@ -144,6 +144,33 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(session["branch_id"], fallback)
         self.assertIsNone(self.connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch["id"],)).fetchone())
 
+    def test_closing_branch_archives_operational_data_and_blocks_new_work(self):
+        branch = server.create_branch(self.connection, {"name": "Закриття", "city": "Київ", "address": "вул. Архівна, 1"})
+        master = server.create_master(self.connection, {"name": "Майстриня Архіву", "role": "Естетистка", "focus": "Догляд", "schedule": "10:00–18:00", "color": "sage", "email": "archive-master@krasunya.local", "password": "secret1"}, branch["id"])
+        room = server.create_room(self.connection, {"name": "Архів · Каб. 1", "type": "Догляд", "status": "Вільний", "detail": "Лампа"}, branch["id"])
+        equipment = server.create_equipment(self.connection, {"name": "Архів · LED", "type": "LED-терапія", "room": room["name"], "status": "Готове"}, branch["id"])
+        procedure = server.create_procedure(self.connection, {"name": "Архів · Glow", "category": "Догляд", "price": 900, "resourcePlan": [{"name": "LED", "duration": 30, "master": master["name"], "room": room["name"], "equipment": equipment["name"]}]}, branch["id"])
+        self.connection.commit()
+        booking = server.create_booking(self.connection, {**self.payload(date="2026-09-06", start="10:00", end="10:30", master=master["name"], room=room["name"], equipment=equipment["name"]), "branchId": branch["id"], "service": procedure["name"]})
+        slot = server.create_slot(self.connection, {"date": "2026-09-06", "branchId": branch["id"], "master": master["name"], "start": "12:00", "end": "12:30", "reason": "Перерва", "createdBy": "admin"})
+        admin_token, _ = server.login_user(self.connection, {"role": "admin", "userId": "admin-001", "password": server.DEMO_PASSWORD, "branchId": branch["id"]})
+        client_token, _ = server.login_user(self.connection, {"role": "client", "userId": "client-001-user", "password": server.DEMO_PASSWORD, "branchId": branch["id"]})
+        closed = server.close_branch(self.connection, branch["id"])
+        self.assertTrue(closed["isClosed"])
+        self.assertEqual(closed["status"], server.CLOSED_BRANCH_STATUS)
+        self.assertTrue(self.connection.execute("SELECT archived FROM bookings WHERE id = ?", (booking["id"],)).fetchone()[0])
+        self.assertTrue(self.connection.execute("SELECT archived FROM rooms WHERE name = ? AND branch_id = ?", (room["name"], branch["id"])).fetchone()[0])
+        self.assertTrue(self.connection.execute("SELECT archived FROM equipment WHERE name = ? AND branch_id = ?", (equipment["name"], branch["id"])).fetchone()[0])
+        self.assertTrue(self.connection.execute("SELECT archived FROM unavailable_slots WHERE id = ?", (slot["id"],)).fetchone()[0])
+        self.assertIsNotNone(self.connection.execute("SELECT 1 FROM sessions WHERE token = ?", (admin_token,)).fetchone())
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM sessions WHERE token = ?", (client_token,)).fetchone())
+        with self.assertRaises(server.ApiError) as context:
+            server.create_room(self.connection, {"name": "Новий кабінет", "type": "Догляд"}, branch["id"])
+        self.assertEqual(context.exception.status, 409)
+        with self.assertRaises(server.ApiError) as context:
+            server.login_user(self.connection, {"role": "client", "userId": "client-001-user", "password": server.DEMO_PASSWORD, "branchId": branch["id"]})
+        self.assertEqual(context.exception.status, 403)
+
     def test_legacy_resource_tables_are_migrated_to_branch_scoped_keys(self):
         legacy_path = Path(self.temp_dir.name) / "legacy.sqlite3"
         legacy_connection = sqlite3.connect(legacy_path)

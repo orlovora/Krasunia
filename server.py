@@ -49,9 +49,12 @@ MAX_PHOTO_DATA_LENGTH = 700_000
 PHOTO_DATA_RE = re.compile(r"^data:image/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=\s]+$")
 
 
+KRASUNYA_ONE_BRANCH_ID = "branch-krasunya-1"
+
 BRANCHES_SEED = [
     {"id": "branch-podil", "name": "Поділ", "city": "Київ", "address": "вул. Нижній Вал, 17", "phone": "+38 044 555 01 01", "hoursStart": "09:00", "hoursEnd": "19:00"},
     {"id": "branch-pechersk", "name": "Печерськ", "city": "Київ", "address": "вул. Басейна, 4", "phone": "+38 044 555 01 02", "hoursStart": "09:00", "hoursEnd": "20:00"},
+    {"id": KRASUNYA_ONE_BRANCH_ID, "name": "Красуня 1", "city": "Харків", "address": "проспект Науки, 41а", "phone": "+38 095 876 36 41", "hoursStart": "10:00", "hoursEnd": "18:00"},
 ]
 
 
@@ -63,6 +66,60 @@ USERS_SEED = [
     {"id": "admin-001", "name": "Ольга Чернова", "email": "olga@krasunya.local", "phone": "+38 067 000 00 01", "role": "admin", "masterName": "", "clientId": "", "branchId": "branch-podil", "initials": "ОЧ"},
     {"id": "master-001", "name": "Ірина Мельник", "email": "iryna@krasunya.local", "phone": "+38 067 000 00 02", "role": "master", "masterName": "Ірина Мельник", "clientId": "", "branchId": "branch-podil", "initials": "ІМ"},
     {"id": "client-001-user", "name": "Марина Соколова", "email": "marina@krasunya.local", "phone": "+38 067 420 18 64", "role": "client", "masterName": "", "clientId": "client-001", "branchId": "branch-podil", "initials": "МС"},
+]
+
+
+KRASUNYA_ONE_MASTERS = [
+    {"name": "Олена Кравченко", "role": "Косметологиня", "initials": "ОК", "color": "peach", "schedule": "10:00–18:00", "focus": "Апаратна косметологія", "photo": ""},
+    {"name": "Марія Шевченко", "role": "Косметологиня-естетистка", "initials": "МШ", "color": "lilac", "schedule": "10:00–18:00", "focus": "Доглядові та ін'єкційні процедури", "photo": ""},
+    {"name": "Наталія Бондаренко", "role": "Косметологиня", "initials": "НБ", "color": "sage", "schedule": "10:00–18:00", "focus": "Лазерна та естетична косметологія", "photo": ""},
+]
+
+KRASUNYA_ONE_ROOMS = [
+    {"name": "Красуня 1 · Каб. 1", "type": "Універсальний кабінет", "status": "Вільний", "detail": "Універсальна станція · кушетка"},
+    {"name": "Красуня 1 · Каб. 2", "type": "Універсальний кабінет", "status": "Вільний", "detail": "Універсальна станція · кушетка"},
+    {"name": "Красуня 1 · Каб. 3", "type": "Універсальний кабінет", "status": "Вільний", "detail": "Універсальна станція · кушетка"},
+]
+
+KRASUNYA_ONE_EQUIPMENT = [
+    {"name": "Красуня 1 · Універсальна станція 1", "type": "Універсальне обладнання", "room": "Красуня 1 · Каб. 1", "status": "Готове"},
+    {"name": "Красуня 1 · Універсальна станція 2", "type": "Універсальне обладнання", "room": "Красуня 1 · Каб. 2", "status": "Готове"},
+    {"name": "Красуня 1 · Універсальна станція 3", "type": "Універсальне обладнання", "room": "Красуня 1 · Каб. 3", "status": "Готове"},
+]
+
+# The official price page publishes several prices per procedure depending on
+# the zone. The catalog stores the representative/base price used for a new
+# booking. Where the site does not publish a duration, 60 minutes is the
+# operational default so the procedure remains schedulable.
+KRASUNYA_ONE_PROCEDURES = [
+    {"id": "krasunya1-velashape", "name": "VelaShape", "category": "Апаратна косметологія", "price": 900, "duration": 60},
+    {"id": "krasunya1-maxlipo", "name": "Апаратне схуднення Maxlipo", "category": "Апаратна косметологія тіла", "price": 700, "duration": 30},
+    {"id": "krasunya1-mesotherapy-noninvasive", "name": "Безін’єкційна мезотерапія", "category": "Апаратна косметологія обличчя", "price": 1200, "duration": 60},
+    {"id": "krasunya1-face-diagnostics", "name": "Діагностика обличчя", "category": "Апаратна косметологія обличчя", "price": 450, "duration": 30},
+    {"id": "krasunya1-endosphere", "name": "Ендосфера", "category": "Апаратна косметологія", "price": 900, "duration": 60},
+    {"id": "krasunya1-cryolifting", "name": "Кріоліфтинг обличчя", "category": "Апаратна косметологія обличчя", "price": 900, "duration": 60},
+    {"id": "krasunya1-microcurrent", "name": "Мікрострумова терапія", "category": "Апаратна косметологія обличчя", "price": 900, "duration": 60},
+    {"id": "krasunya1-liquid-plasma", "name": "Рідка плазма", "category": "Апаратна косметологія обличчя", "price": 900, "duration": 60},
+    {"id": "krasunya1-light-therapy", "name": "Світлотерапія", "category": "Апаратна косметологія обличчя", "price": 900, "duration": 60},
+    {"id": "krasunya1-thermotherapy", "name": "Термотерапія", "category": "Апаратна косметологія обличчя", "price": 900, "duration": 60},
+    {"id": "krasunya1-ultraphonophoresis", "name": "Ультрафонофорез", "category": "Апаратна косметологія обличчя", "price": 900, "duration": 60},
+    {"id": "krasunya1-fractional-rf", "name": "Фракційний RF-ліфтинг", "category": "Апаратна косметологія", "price": 1900, "duration": 60},
+    {"id": "krasunya1-carboxy", "name": "Карбоксітерапія", "category": "Апаратна косметологія", "price": 1000, "duration": 60},
+    {"id": "krasunya1-dermapen", "name": "Дермапен", "category": "Апаратна косметологія обличчя", "price": 1200, "duration": 60},
+    {"id": "krasunya1-living-collagen", "name": "Живий колаген", "category": "Доглядові процедури", "price": 1000, "duration": 60},
+    {"id": "krasunya1-enzyme", "name": "Ферментотерапія", "category": "Доглядові процедури", "price": 1000, "duration": 60},
+    {"id": "krasunya1-cleansing", "name": "Чистки", "category": "Доглядові процедури", "price": 1000, "duration": 60},
+    {"id": "krasunya1-care", "name": "Доглядові процедури", "category": "Доглядові процедури", "price": 1000, "duration": 60},
+    {"id": "krasunya1-wraps", "name": "Обгортання", "category": "Доглядові процедури", "price": 1200, "duration": 60},
+    {"id": "krasunya1-peels", "name": "Пілінги", "category": "Доглядові процедури", "price": 900, "duration": 60},
+    {"id": "krasunya1-massages", "name": "Масажі", "category": "Естетична косметологія", "price": 1000, "duration": 60},
+    {"id": "krasunya1-biorevitalization", "name": "Біоревіталізація Juvéderm", "category": "Ін’єкційна косметологія", "price": 4500, "duration": 60},
+    {"id": "krasunya1-botox", "name": "Ботулінотерапія Botox", "category": "Ін’єкційна косметологія", "price": 1500, "duration": 60},
+    {"id": "krasunya1-mesotherapy", "name": "Мезотерапія", "category": "Ін’єкційна косметологія", "price": 1200, "duration": 60},
+    {"id": "krasunya1-ipl", "name": "IPL-терапія", "category": "Лазерна косметологія", "price": 1200, "duration": 60},
+    {"id": "krasunya1-laser-hair", "name": "Лазерна епіляція", "category": "Лазерна косметологія", "price": 150, "duration": 30},
+    {"id": "krasunya1-laser-pigment", "name": "Лазерне видалення пігментації", "category": "Лазерна косметологія", "price": 1150, "duration": 60},
+    {"id": "krasunya1-laser-resurfacing", "name": "Лазерне шліфування", "category": "Лазерна косметологія", "price": 4500, "duration": 90},
 ]
 
 
@@ -451,9 +508,9 @@ def init_db() -> None:
             seed_db(connection)
         for equipment in SEED["equipment"]:
             connection.execute("INSERT OR IGNORE INTO equipment (name, branch_id, type, room, status) VALUES (?, ?, ?, ?, ?)", (equipment["name"], "branch-podil", equipment["type"], equipment["room"], equipment["status"]))
-        if connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
-            for user in USERS_SEED:
-                connection.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (user["id"], user["name"], user["email"], user["phone"], user["role"], user["masterName"], user["clientId"], user["branchId"], user["initials"], password_hash(DEMO_PASSWORD)))
+        for user in USERS_SEED:
+            connection.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (user["id"], user["name"], user["email"], user["phone"], user["role"], user["masterName"], user["clientId"], user["branchId"], user["initials"], password_hash(DEMO_PASSWORD)))
+        seed_krasunya_one(connection)
         connection.execute(
             "UPDATE users SET name = ?, initials = ? WHERE id = ? AND name = ?",
             ("Ольга Чернова", "ОЧ", "admin-001", "Ольга Коваль"),
@@ -476,6 +533,58 @@ def seed_db(connection: sqlite3.Connection) -> None:
     timestamp = now_iso()
     for booking in SEED["bookings"]:
         connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, \"end\", price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], "branch-podil", booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
+
+
+def seed_krasunya_one(connection: sqlite3.Connection) -> None:
+    """Create the requested Красуня 1 branch and its reusable catalog.
+
+    This is intentionally idempotent so an already-connected Neon database is
+    upgraded on the next cold start without replacing any user-edited data.
+    """
+    branch_id = KRASUNYA_ONE_BRANCH_ID
+    master_names = [item["name"] for item in KRASUNYA_ONE_MASTERS]
+    room_names = [item["name"] for item in KRASUNYA_ONE_ROOMS]
+    equipment_names = [item["name"] for item in KRASUNYA_ONE_EQUIPMENT]
+
+    for master in KRASUNYA_ONE_MASTERS:
+        connection.execute(
+            "INSERT OR IGNORE INTO masters (name, branch_id, role, initials, color, schedule, focus, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (master["name"], branch_id, master["role"], master["initials"], master["color"], master["schedule"], master["focus"], master["photo"]),
+        )
+    for index, master in enumerate(KRASUNYA_ONE_MASTERS, start=1):
+        email = f"master.krasunya1.{index}@krasunya.local"
+        connection.execute(
+            "INSERT OR IGNORE INTO users (id, name, email, phone, role, master_name, client_id, branch_id, initials, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (f"master-krasunya1-{index:03d}", master["name"], email, "", "master", master["name"], "", branch_id, master["initials"], password_hash(DEMO_PASSWORD)),
+        )
+    for room in KRASUNYA_ONE_ROOMS:
+        connection.execute(
+            "INSERT OR IGNORE INTO rooms (name, branch_id, type, status, detail) VALUES (?, ?, ?, ?, ?)",
+            (room["name"], branch_id, room["type"], room["status"], room["detail"]),
+        )
+    for equipment in KRASUNYA_ONE_EQUIPMENT:
+        connection.execute(
+            "INSERT OR IGNORE INTO equipment (name, branch_id, type, room, status) VALUES (?, ?, ?, ?, ?)",
+            (equipment["name"], branch_id, equipment["type"], equipment["room"], equipment["status"]),
+        )
+    for index, procedure in enumerate(KRASUNYA_ONE_PROCEDURES):
+        default_master = master_names[index % len(master_names)]
+        default_room = room_names[index % len(room_names)]
+        default_equipment = equipment_names[index % len(equipment_names)]
+        resource_plan = [{
+            "name": procedure["name"],
+            "duration": procedure["duration"],
+            "master": default_master,
+            "room": default_room,
+            "equipment": default_equipment,
+            "masterOptions": master_names,
+            "roomOptions": room_names,
+            "equipmentOptions": equipment_names,
+        }]
+        connection.execute(
+            "INSERT OR IGNORE INTO procedures (id, branch_id, name, category, duration, price, stages, relation, resource_plan_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (procedure["id"], branch_id, procedure["name"], procedure["category"], duration_label(procedure["duration"]), procedure["price"], 1, "3 майстри · 3 кабінети", json.dumps(resource_plan, ensure_ascii=False)),
+        )
 
 
 def row_client(row: sqlite3.Row) -> dict[str, Any]:
@@ -920,6 +1029,16 @@ def update_master(connection: sqlite3.Connection, master_name: str, payload: dic
     return row_branch_resource(connection.execute("SELECT * FROM masters WHERE name = ? AND branch_id = ?", (master_name, branch_id)).fetchone())
 
 
+def stage_option_values(stage: dict[str, Any], value_key: str, options_key: str) -> list[str]:
+    options = stage.get(options_key)
+    if isinstance(options, list):
+        values = [str(value).strip() for value in options if str(value).strip()]
+        if values:
+            return list(dict.fromkeys(values))
+    value = str(stage.get(value_key) or "").strip()
+    return [value] if value else []
+
+
 def master_is_referenced(connection: sqlite3.Connection, master_name: str, branch_id: str = "branch-podil") -> bool:
     if connection.execute("SELECT 1 FROM unavailable_slots WHERE master = ? AND branch_id = ? LIMIT 1", (master_name, branch_id)).fetchone():
         return True
@@ -927,7 +1046,7 @@ def master_is_referenced(connection: sqlite3.Connection, master_name: str, branc
         if any(stage.get("master") == master_name for stage in json.loads(row["stages_json"])):
             return True
     for row in connection.execute("SELECT resource_plan_json FROM procedures WHERE branch_id = ?", (branch_id,)):
-        if any(stage.get("master") == master_name for stage in json.loads(row["resource_plan_json"])):
+        if any(master_name in stage_option_values(stage, "master", "masterOptions") for stage in json.loads(row["resource_plan_json"])):
             return True
     return False
 
@@ -983,7 +1102,7 @@ def delete_room(connection: sqlite3.Connection, room_name: str, branch_id: str =
         if any(stage.get("room") == room_name for stage in json.loads(row["stages_json"])):
             raise ApiError("Кабінет використовується в історії записів і не може бути видалений.", 409)
     for row in connection.execute("SELECT resource_plan_json FROM procedures WHERE branch_id = ?", (branch_id,)):
-        if any(stage.get("room") == room_name for stage in json.loads(row["resource_plan_json"])):
+        if any(room_name in stage_option_values(stage, "room", "roomOptions") for stage in json.loads(row["resource_plan_json"])):
             raise ApiError("Кабінет використовується в процедурах. Спочатку змініть їх маршрути.", 409)
     connection.execute("DELETE FROM rooms WHERE name = ? AND branch_id = ?", (room_name, branch_id))
 
@@ -1029,7 +1148,7 @@ def delete_equipment(connection: sqlite3.Connection, equipment_name: str, branch
         if any(stage.get("equipment") == equipment_name for stage in json.loads(row["stages_json"])):
             raise ApiError("Обладнання використовується в історії записів і не може бути видалене.", 409)
     for row in connection.execute("SELECT resource_plan_json FROM procedures WHERE branch_id = ?", (branch_id,)):
-        if any(stage.get("equipment") == equipment_name for stage in json.loads(row["resource_plan_json"])):
+        if any(equipment_name in stage_option_values(stage, "equipment", "equipmentOptions") for stage in json.loads(row["resource_plan_json"])):
             raise ApiError("Обладнання використовується в процедурах. Спочатку змініть їх маршрути.", 409)
     connection.execute("DELETE FROM equipment WHERE name = ? AND branch_id = ?", (equipment_name, branch_id))
 
@@ -1070,16 +1189,23 @@ def validate_procedure(connection: sqlite3.Connection, payload: dict[str, Any], 
             total_duration += stage_duration + (gap_after if index < len(resource_plan) - 1 else 0)
         except (TypeError, ValueError):
             details.append(f"Тривалість етапу {index + 1} має бути числом.")
-        if stage.get("master") and not connection.execute("SELECT 1 FROM masters WHERE name = ? AND branch_id = ?", (stage["master"], branch_id)).fetchone():
-            details.append(f"Майстра «{stage['master']}» не знайдено.")
-        if stage.get("room") and not connection.execute("SELECT 1 FROM rooms WHERE name = ? AND branch_id = ?", (stage["room"], branch_id)).fetchone():
-            details.append(f"Кабінет «{stage['room']}» не знайдено.")
-        if stage.get("equipment") and not connection.execute("SELECT 1 FROM equipment WHERE name = ? AND branch_id = ?", (stage["equipment"], branch_id)).fetchone():
-            details.append(f"Обладнання «{stage['equipment']}» не знайдено.")
+        for value_key, options_key, table, label in (
+            ("master", "masterOptions", "masters", "Майстра"),
+            ("room", "roomOptions", "rooms", "Кабінет"),
+            ("equipment", "equipmentOptions", "equipment", "Обладнання"),
+        ):
+            options = stage_option_values(stage, value_key, options_key)
+            if not options:
+                continue
+            if stage.get(value_key) not in options:
+                details.append(f"В етапі {index + 1} значення «{value_key}» має бути одним із доступних варіантів.")
+            for option in options:
+                if not connection.execute(f"SELECT 1 FROM {table} WHERE name = ? AND branch_id = ?", (option, branch_id)).fetchone():
+                    details.append(f"{label} «{option}» не знайдено.")
     if details:
         raise ApiError("Процедура не пройшла перевірку.", 422, sorted(set(details)))
-    masters = {stage["master"] for stage in resource_plan}
-    rooms = {stage["room"] for stage in resource_plan}
+    masters = {option for stage in resource_plan for option in stage_option_values(stage, "master", "masterOptions")}
+    rooms = {option for stage in resource_plan for option in stage_option_values(stage, "room", "roomOptions")}
     master_word = "майстер" if len(masters) == 1 else "майстри"
     room_word = "кабінет" if len(rooms) == 1 else "кабінети"
     return {"name": name, "category": category, "duration": duration_label(total_duration), "price": price, "stages": len(resource_plan), "relation": f"{len(masters)} {master_word} · {len(rooms)} {room_word}", "resourcePlan": resource_plan}

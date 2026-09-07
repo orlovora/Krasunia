@@ -147,6 +147,22 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn(master["name"], [item["name"] for item in podil_state["masters"]])
         self.assertNotIn(room["name"], [item["name"] for item in podil_state["rooms"]])
 
+    def test_krasunya_one_has_catalog_and_universal_resource_options(self):
+        branch = self.connection.execute("SELECT * FROM branches WHERE id = ?", (server.KRASUNYA_ONE_BRANCH_ID,)).fetchone()
+        self.assertEqual(branch["name"], "Красуня 1")
+        self.assertEqual(branch["city"], "Харків")
+        masters = self.connection.execute("SELECT name FROM masters WHERE branch_id = ? ORDER BY name", (server.KRASUNYA_ONE_BRANCH_ID,)).fetchall()
+        rooms = self.connection.execute("SELECT name FROM rooms WHERE branch_id = ? ORDER BY name", (server.KRASUNYA_ONE_BRANCH_ID,)).fetchall()
+        procedures = self.connection.execute("SELECT * FROM procedures WHERE branch_id = ?", (server.KRASUNYA_ONE_BRANCH_ID,)).fetchall()
+        self.assertEqual(len(masters), 3)
+        self.assertEqual(len(rooms), 3)
+        self.assertEqual(len(procedures), len(server.KRASUNYA_ONE_PROCEDURES))
+        for procedure in procedures:
+            stage = server.json.loads(procedure["resource_plan_json"])[0]
+            self.assertCountEqual(stage["masterOptions"], [row["name"] for row in masters])
+            self.assertCountEqual(stage["roomOptions"], [row["name"] for row in rooms])
+            self.assertEqual(procedure["relation"], "3 майстри · 3 кабінети")
+
     def test_current_branch_can_be_deleted_after_records_are_removed(self):
         branch = server.create_branch(self.connection, {"name": "Тимчасова", "city": "Київ", "address": "вул. Тестова, 1"})
         token, user = server.login_user(self.connection, {"role": "admin", "userId": "admin-001", "password": server.DEMO_PASSWORD, "branchId": branch["id"]})

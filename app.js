@@ -694,7 +694,10 @@ function getProcedure(procedureId) {
 }
 
 function getProcedureMasters(procedureId) {
-  return [...new Set((getProcedure(procedureId)?.resourcePlan || []).map((stage) => stage.master))];
+  return [...new Set((getProcedure(procedureId)?.resourcePlan || []).flatMap((stage) => {
+    const options = Array.isArray(stage.masterOptions) && stage.masterOptions.length ? stage.masterOptions : [stage.master];
+    return options.filter(Boolean);
+  }))];
 }
 
 function getClientProcedureMasters(clientId, procedureId) {
@@ -1389,7 +1392,17 @@ function readProcedureStages(form) {
   const rooms = data.getAll("stageRoom");
   const equipment = data.getAll("stageEquipment");
   const gaps = data.getAll("stageGap");
-  return names.map((name, index) => ({ name: String(name).trim(), duration: Number(durations[index] || 0), master: masters[index], room: rooms[index], equipment: equipment[index], gapAfter: Number(gaps[index] || 0) }));
+  return names.map((name, index) => ({
+    name: String(name).trim(),
+    duration: Number(durations[index] || 0),
+    master: masters[index],
+    room: rooms[index],
+    equipment: equipment[index],
+    gapAfter: Number(gaps[index] || 0),
+    ...(directoryDraftStages[index]?.masterOptions?.length ? { masterOptions: [...directoryDraftStages[index].masterOptions] } : {}),
+    ...(directoryDraftStages[index]?.roomOptions?.length ? { roomOptions: [...directoryDraftStages[index].roomOptions] } : {}),
+    ...(directoryDraftStages[index]?.equipmentOptions?.length ? { equipmentOptions: [...directoryDraftStages[index].equipmentOptions] } : {})
+  }));
 }
 
 function syncProcedureDraft() {

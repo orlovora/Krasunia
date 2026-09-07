@@ -41,6 +41,7 @@ SALON_START = "09:00"
 SALON_END = "19:00"
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
 DEMO_PASSWORD = "demo123"
+ACTIVE_BOOKING_STATUSES = {"booked", "confirmed"}
 SESSIONS: dict[str, str] = {}
 MAX_PHOTO_DATA_LENGTH = 700_000
 PHOTO_DATA_RE = re.compile(r"^data:image/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=\s]+$")
@@ -612,18 +613,23 @@ def delete_admin(connection: sqlite3.Connection, admin_id: str, current_user_id:
     connection.execute("DELETE FROM users WHERE id = ?", (admin_id,))
 
 
-def delete_branch(connection: sqlite3.Connection, branch_id: str) -> None:
+def delete_branch(connection: sqlite3.Connection, branch_id: str, current_branch_id: str | None = None) -> None:
     if not connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch_id,)).fetchone():
         raise ApiError("Філію не знайдено.", 404)
+    if current_branch_id and branch_id == current_branch_id:
+        raise ApiError("Спочатку перемкніться на іншу філію.", 409)
     if connection.execute("SELECT COUNT(*) FROM branches").fetchone()[0] <= 1:
         raise ApiError("У системі має залишитися щонайменше одна філія.", 409)
     references = []
-    for table in ("users", "bookings", "unavailable_slots", "sessions"):
+    for table in ("users", "bookings", "unavailable_slots"):
         count = connection.execute(f"SELECT COUNT(*) FROM {table} WHERE branch_id = ?", (branch_id,)).fetchone()[0]
         if count:
             references.append(f"{table}: {count}")
     if references:
         raise ApiError("Філію не можна видалити, доки вона використовується.", 409, references)
+    # Sessions are disposable references and must not block deleting an
+    # otherwise empty branch.
+    connection.execute("DELETE FROM sessions WHERE branch_id = ?", (branch_id,))
     connection.execute("DELETE FROM branches WHERE id = ?", (branch_id,))
 
 
@@ -1025,6 +1031,8 @@ def validate_booking(connection: sqlite3.Connection, payload: dict[str, Any], ex
                 conflicts.append(f"{stage['master']}: неробочий час {slot['start']}—{slot['end']}{reason}")
     for row in connection.execute("SELECT * FROM bookings WHERE date = ? AND branch_id = ? AND id != ?", (payload["date"], branch_id, excluded_id)):
         existing = row_booking(row)
+        if existing["status"] not in ACTIVE_BOOKING_STATUSES:
+            continue
         for new_stage in stages:
             for old_stage in existing["stages"]:
                 conflict = resources_conflict(new_stage, old_stage)
@@ -1058,10 +1066,15 @@ def update_client_masters(connection: sqlite3.Connection, booking: dict[str, Any
     connection.execute("UPDATE clients SET master_names_json = ? WHERE id = ?", (json.dumps(sorted(names), ensure_ascii=False), booking["clientId"]))
 
 
-def update_booking(connection: sqlite3.Connection, booking_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def update_booking(connection: sqlite3.Connection, booking_id: str, payload: dict[str, Any], branch_id: str | None = None) -> dict[str, Any]:
     begin_write(connection)
     try:
-        current = connection.execute("SELECT * FROM bookings WHERE id = ?", (booking_id,)).fetchone()
+        query = "SELECT * FROM bookings WHERE id = ?"
+        args: tuple[Any, ...] = (booking_id,)
+        if branch_id:
+            query += " AND branch_id = ?"
+            args += (branch_id,)
+        current = connection.execute(query, args).fetchone()
         if not current:
             raise ApiError("Запис не знайдено.", 404)
         current_data = row_booking(current)
@@ -1070,6 +1083,29 @@ def update_booking(connection: sqlite3.Connection, booking_id: str, payload: dic
         connection.execute("UPDATE bookings SET date=?, branch_id=?, client_id=?, client=?, phone=?, service=?, kind=?, start=?, \"end\"=?, price=?, status=?, stages_json=?, updated_at=? WHERE id=?", (booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), now_iso(), booking_id))
         update_client_masters(connection, booking)
         connection.commit()
+        return booking
+    except Exception:
+        connection.rollback()
+        raise
+
+
+def cancel_booking(connection: sqlite3.Connection, booking_id: str, branch_id: str | None = None) -> dict[str, Any]:
+    begin_write(connection)
+    try:
+        query = "SELECT * FROM bookings WHERE id = ?"
+        args: tuple[Any, ...] = (booking_id,)
+        if branch_id:
+            query += " AND branch_id = ?"
+            args += (branch_id,)
+        current = connection.execute(query, args).fetchone()
+        if not current:
+            raise ApiError("Запис не знайдено.", 404)
+        if current["status"] == "cancelled":
+            raise ApiError("Запис уже скасовано.", 409)
+        connection.execute("UPDATE bookings SET status = ?, updated_at = ? WHERE id = ?", ("cancelled", now_iso(), booking_id))
+        connection.commit()
+        booking = row_booking(current)
+        booking["status"] = "cancelled"
         return booking
     except Exception:
         connection.rollback()
@@ -1097,6 +1133,8 @@ def validate_slot(connection: sqlite3.Connection, payload: dict[str, Any], exclu
         raise ApiError("Цей неробочий час уже перетинається з іншим інтервалом.", 409)
     for row in connection.execute("SELECT * FROM bookings WHERE date = ? AND branch_id = ?", (payload["date"], branch_id)):
         booking = row_booking(row)
+        if booking["status"] not in ACTIVE_BOOKING_STATUSES:
+            continue
         for stage in booking["stages"]:
             if stage["master"] == payload["master"] and overlaps(payload["start"], payload["end"], stage["start"], stage["end"]):
                 raise ApiError(f"Неможливо заблокувати час: {booking['client']} має запис {stage['start']}—{stage['end']}.", 409)
@@ -1261,7 +1299,7 @@ class Handler(SimpleHTTPRequestHandler):
                 elif parts[1] == "branches":
                     begin_write(connection)
                     try:
-                        delete_branch(connection, unquote(parts[2]))
+                        delete_branch(connection, unquote(parts[2]), user_data["branchId"])
                         connection.commit()
                     except Exception:
                         connection.rollback()
@@ -1379,7 +1417,12 @@ class Handler(SimpleHTTPRequestHandler):
                     if user_data["role"] == "client":
                         raise ApiError("Клієнт не може змінювати запис.", 403)
                     payload["branchId"] = user_data["branchId"]
-                    self.send_json(200, {"booking": update_booking(connection, parts[2], payload)})
+                    booking_id = unquote(parts[2])
+                    if payload.get("status") == "cancelled":
+                        booking = cancel_booking(connection, booking_id, user_data["branchId"])
+                    else:
+                        booking = update_booking(connection, booking_id, payload, user_data["branchId"])
+                    self.send_json(200, {"booking": booking})
                 elif parts == ["api", "availability"] and method == "POST":
                     _, _, user_data = require_user(self)
                     if user_data["role"] == "client":

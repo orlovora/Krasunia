@@ -42,7 +42,7 @@ PORT=4174 KRASUNYA_DB=/private/tmp/krasunya.sqlite3 python3 server.py
 - `POST /api/admins` і `DELETE /api/admins/:id` — додавання та видалення інших адміністраторів.
 - `POST/PATCH/DELETE /api/masters`, `/api/rooms`, `/api/equipment`, `/api/procedures` — керування довідниками адміністратором.
 - `POST /api/bookings` — створення запису із серверною перевіркою ресурсів.
-- `PATCH /api/bookings/:id` — перенесення запису з повторною перевіркою.
+- `PATCH /api/bookings/:id` — перенесення запису з повторною перевіркою або скасування через `{"status":"cancelled"}`; скасований запис зберігається в історії, але звільняє ресурси.
 - `POST /api/availability` — додавання неробочого часу.
 - `PATCH /api/availability/:id` і `DELETE /api/availability/:id` — зміна та видалення інтервалу.
 

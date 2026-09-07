@@ -59,6 +59,20 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(updated["date"], "2026-09-05")
         self.assertEqual(updated["start"], "10:00")
 
+    def test_cancel_booking_releases_its_resources(self):
+        cancelled = server.cancel_booking(self.connection, "visit-002", "branch-podil")
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(self.connection.execute("SELECT status FROM bookings WHERE id = 'visit-002'").fetchone()[0], "cancelled")
+
+        replacement = self.payload(date="2026-09-04", start="11:00", end="12:00")
+        created = server.create_booking(self.connection, replacement)
+        self.assertEqual(created["start"], "11:00")
+
+    def test_cancelled_booking_does_not_block_unavailable_time(self):
+        server.cancel_booking(self.connection, "visit-003", "branch-podil")
+        slot = server.create_slot(self.connection, {"date": "2026-09-04", "master": "Ірина Мельник", "start": "13:00", "end": "14:00", "reason": "Перерва", "createdBy": "admin"})
+        self.assertEqual(slot["start"], "13:00")
+
     def test_blocking_time_with_existing_booking_is_rejected(self):
         payload = {"date": "2026-09-04", "master": "Анна Левченко", "start": "09:30", "end": "10:00", "reason": "Перерва", "createdBy": "admin"}
         with self.assertRaises(server.ApiError) as context:
@@ -96,8 +110,10 @@ class BackendTests(unittest.TestCase):
             server.delete_admin(self.connection, "admin-001", "admin-001")
         self.assertEqual(context.exception.status, 409)
         empty_branch = server.create_branch(self.connection, {"name": "Центр", "city": "Київ", "address": "вул. Хрещатик, 1"})
+        self.connection.execute("INSERT INTO sessions (token, user_id, branch_id, created_at) VALUES (?, ?, ?, ?)", ("stale-branch-session", "admin-001", empty_branch["id"], server.now_iso()))
         server.delete_branch(self.connection, empty_branch["id"])
         self.assertIsNone(self.connection.execute("SELECT 1 FROM branches WHERE id = ?", (empty_branch["id"],)).fetchone())
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM sessions WHERE token = ?", ("stale-branch-session",)).fetchone())
         with self.assertRaises(server.ApiError) as context:
             server.delete_branch(self.connection, "branch-podil")
         self.assertEqual(context.exception.status, 409)

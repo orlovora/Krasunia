@@ -60,7 +60,7 @@ def password_hash(password: str) -> str:
 
 
 USERS_SEED = [
-    {"id": "admin-001", "name": "Ольга Коваль", "email": "olga@krasunya.local", "phone": "+38 067 000 00 01", "role": "admin", "masterName": "", "clientId": "", "branchId": "branch-podil", "initials": "ОК"},
+    {"id": "admin-001", "name": "Ольга Чернова", "email": "olga@krasunya.local", "phone": "+38 067 000 00 01", "role": "admin", "masterName": "", "clientId": "", "branchId": "branch-podil", "initials": "ОЧ"},
     {"id": "master-001", "name": "Ірина Мельник", "email": "iryna@krasunya.local", "phone": "+38 067 000 00 02", "role": "master", "masterName": "Ірина Мельник", "clientId": "", "branchId": "branch-podil", "initials": "ІМ"},
     {"id": "client-001-user", "name": "Марина Соколова", "email": "marina@krasunya.local", "phone": "+38 067 420 18 64", "role": "client", "masterName": "", "clientId": "client-001", "branchId": "branch-podil", "initials": "МС"},
 ]
@@ -454,6 +454,10 @@ def init_db() -> None:
         if connection.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             for user in USERS_SEED:
                 connection.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (user["id"], user["name"], user["email"], user["phone"], user["role"], user["masterName"], user["clientId"], user["branchId"], user["initials"], password_hash(DEMO_PASSWORD)))
+        connection.execute(
+            "UPDATE users SET name = ?, initials = ? WHERE id = ? AND name = ?",
+            ("Ольга Чернова", "ОЧ", "admin-001", "Ольга Коваль"),
+        )
 
 
 def seed_db(connection: sqlite3.Connection) -> None:

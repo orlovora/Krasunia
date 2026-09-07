@@ -144,7 +144,7 @@ let bookingDraftProcedures = [];
 let bookingDraftOffsets = {};
 
 const demoUsers = {
-  admin: [{ id: "admin-001", name: "Ольга Коваль", role: "admin", initials: "ОК", email: "olga@krasunya.local" }],
+  admin: [{ id: "admin-001", name: "Ольга Чернова", role: "admin", initials: "ОЧ", email: "olga@krasunya.local" }],
   master: [{ id: "master-001", name: "Ірина Мельник", role: "master", initials: "ІМ", email: "iryna@krasunya.local", masterName: "Ірина Мельник", branchId: "branch-podil" }],
   client: [{ id: "client-001-user", name: "Марина Соколова", role: "client", initials: "МС", email: "marina@krasunya.local" }]
 };

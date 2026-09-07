@@ -91,6 +91,13 @@ class BackendTests(unittest.TestCase):
             server.login_user(self.connection, {"role": "admin", "userId": "admin-001", "password": "wrong", "branchId": "branch-podil"})
         self.assertEqual(context.exception.status, 401)
 
+    def test_legacy_admin_name_is_migrated(self):
+        self.connection.execute("UPDATE users SET name = ?, initials = ? WHERE id = ?", ("Ольга Коваль", "ОК", "admin-001"))
+        self.connection.commit()
+        server.init_db()
+        admin = self.connection.execute("SELECT name, initials FROM users WHERE id = 'admin-001'").fetchone()
+        self.assertEqual(dict(admin), {"name": "Ольга Чернова", "initials": "ОЧ"})
+
     def test_admin_can_create_branch(self):
         branch = server.create_branch(self.connection, {"name": "Центр", "city": "Київ", "address": "вул. Хрещатик, 1", "phone": "+38 044 555 01 03", "hoursStart": "10:00", "hoursEnd": "20:00"})
         self.assertEqual(branch["city"], "Київ")

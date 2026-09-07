@@ -150,6 +150,7 @@ const demoUsers = {
 };
 const demoPasswords = { "admin-001": "demo123", "master-001": "demo123", "client-001-user": "demo123" };
 const BRANCHES_STORAGE_KEY = "krasunya-branches-cache";
+const AUTH_STORAGE_KEY = "krasunya-auth-session";
 
 function readCachedBranches() {
   try {
@@ -163,6 +164,27 @@ function readCachedBranches() {
 function cacheBranches(branches) {
   try {
     localStorage.setItem(BRANCHES_STORAGE_KEY, JSON.stringify(branches));
+  } catch {
+    // Storage may be unavailable in private browsing or embedded previews.
+  }
+}
+
+function readCachedSession() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || "null");
+    return cached?.user ? cached : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheSession(user) {
+  try {
+    if (user) {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ user }));
+    } else {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
   } catch {
     // Storage may be unavailable in private browsing or embedded previews.
   }
@@ -194,6 +216,8 @@ async function loadPersistentState() {
     if (session.users) Object.assign(demoUsers, session.users);
     if (!session.authenticated) {
       state.authenticated = false;
+      state.user = null;
+      cacheSession(null);
       render();
       return;
     }
@@ -208,7 +232,8 @@ async function loadPersistentState() {
     render();
   } catch (error) {
     apiAvailable = false;
-    state.authenticated = false;
+    apiReady = false;
+    if (!state.user) state.authenticated = false;
     render();
     console.warn("Backend недоступний, вхід працює в локальному демо-режимі.", error);
   }
@@ -235,12 +260,14 @@ async function reloadBootstrap() {
     state.user = { ...state.user, ...payload.session };
     state.role = state.user.role;
     state.branchId = state.user.branchId || state.branchId;
+    cacheSession(state.user);
   }
 }
 
 function applySessionUser(user) {
   state.user = user;
   state.authenticated = Boolean(user);
+  cacheSession(user);
   if (!user) return;
   state.role = user.role;
   state.branchId = user.branchId || state.branchId;
@@ -553,6 +580,7 @@ async function switchBranch(branchId) {
     } else {
       state.branchId = branchId;
       if (state.user) state.user.branchId = branchId;
+      cacheSession(state.user);
     }
     closeModal();
     render();
@@ -571,6 +599,7 @@ async function logoutFromSystem() {
   apiReady = false;
   state.authenticated = false;
   state.user = null;
+  cacheSession(null);
   state.role = "admin";
   state.section = "schedule";
   closeModal();
@@ -2319,5 +2348,7 @@ document.addEventListener("keydown", (event) => {
 
 const cachedBranches = readCachedBranches();
 if (cachedBranches.length) state.branches = cachedBranches;
+const cachedSession = readCachedSession();
+if (cachedSession?.user) applySessionUser(cachedSession.user);
 render();
 loadPersistentState();

@@ -4,7 +4,7 @@ const state = {
   user: null,
   section: "schedule",
   view: "day",
-  selectedDate: "2026-09-04",
+  selectedDate: getTodayIsoDate(),
   branchId: "branch-podil",
   branches: [
     { id: "branch-podil", name: "Поділ", city: "Київ", address: "вул. Нижній Вал, 17", phone: "+38 044 555 01 01", hoursStart: "09:00", hoursEnd: "19:00" },
@@ -121,6 +121,14 @@ const state = {
     { name: "Дар'я Пархоменко", role: "Естетистка", initials: "ДП", color: "sage", schedule: "09:00–17:00", focus: "Брови й нігті", photo: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=160&h=160&q=82" }
   ]
 };
+
+// The standalone demo has no API response to scope directory data by branch,
+// so mark its seed resources explicitly. The backend returns the same field.
+["masters", "rooms", "equipment", "procedures"].forEach((key) => {
+  state[key] = state[key].map((item) => ({ branchId: "branch-podil", ...item }));
+});
+state.bookings = state.bookings.map((item) => ({ branchId: "branch-podil", ...item }));
+state.unavailableSlots = state.unavailableSlots.map((item) => ({ branchId: "branch-podil", ...item }));
 
 const salonHours = { start: "09:00", end: "19:00" };
 const scheduleHourHeight = 72;
@@ -240,6 +248,73 @@ function toTime(totalMinutes) {
 
 function dateObject(isoDate) {
   return new Date(`${isoDate}T12:00:00`);
+}
+
+function toIsoDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getTodayIsoDate() {
+  return toIsoDate(new Date());
+}
+
+function addDays(isoDate, amount) {
+  const date = dateObject(isoDate);
+  date.setDate(date.getDate() + amount);
+  return toIsoDate(date);
+}
+
+function addMonths(isoDate, amount) {
+  const source = dateObject(isoDate);
+  const target = new Date(source.getFullYear(), source.getMonth() + amount, 1, 12);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0, 12).getDate();
+  target.setDate(Math.min(source.getDate(), lastDay));
+  return toIsoDate(target);
+}
+
+function shiftScheduleDate(isoDate, amount) {
+  if (state.view === "week") return addDays(isoDate, amount * 7);
+  if (state.view === "month") return addMonths(isoDate, amount);
+  if (state.view === "year") {
+    const date = dateObject(isoDate);
+    date.setFullYear(date.getFullYear() + amount);
+    return toIsoDate(date);
+  }
+  return addDays(isoDate, amount);
+}
+
+function startOfWeek(isoDate) {
+  const date = dateObject(isoDate);
+  const weekday = date.getDay() || 7;
+  date.setDate(date.getDate() - weekday + 1);
+  return toIsoDate(date);
+}
+
+function getBranchItems(key) {
+  return (state[key] || []).filter((item) => !item.branchId || item.branchId === state.branchId);
+}
+
+function isCalendarBookingVisible(booking) {
+  return isActiveBooking(booking) && (state.role !== "master" || bookingBelongsToCurrentMaster(booking));
+}
+
+function calendarBookingsForDate(isoDate) {
+  return state.bookings.filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && booking.date === isoDate && isCalendarBookingVisible(booking));
+}
+
+function calendarUnavailableForDate(isoDate) {
+  return state.unavailableSlots.filter((slot) => (!slot.branchId || slot.branchId === state.branchId) && slot.date === isoDate && (state.role !== "master" || slot.master === getCurrentMasterName()));
+}
+
+function formatMonthTitle(isoDate) {
+  return new Intl.DateTimeFormat("uk-UA", { month: "long", year: "numeric" }).format(dateObject(isoDate));
+}
+
+function formatYearTitle(isoDate) {
+  return new Intl.DateTimeFormat("uk-UA", { year: "numeric" }).format(dateObject(isoDate));
 }
 
 function formatShortDate(isoDate) {
@@ -366,23 +441,16 @@ async function deleteBranch(branchId) {
   }
   if (!window.confirm(`Видалити філію «${branch.name}»? Дію не можна скасувати.`)) return;
   try {
-    if (branch.id === state.branchId) {
-      if (apiReady) {
-        const response = await apiRequest("/auth/branch", { method: "POST", body: JSON.stringify({ branchId: fallbackBranch.id }) });
-        applySessionUser({ ...state.user, ...response.user });
-        const bootstrap = await apiRequest("/bootstrap");
-        ["clients", "masters", "rooms", "equipment", "procedures", "bookings", "unavailableSlots", "branches"].forEach((key) => {
-          if (Array.isArray(bootstrap[key])) state[key] = bootstrap[key];
-        });
-        if (bootstrap.session) applySessionUser(bootstrap.session);
-      } else {
-        state.branchId = fallbackBranch.id;
-        if (state.user) state.user.branchId = fallbackBranch.id;
-      }
-    }
     if (apiReady) await apiRequest(`/branches/${encodeURIComponent(branchId)}`, { method: "DELETE" });
     state.branches = state.branches.filter((item) => item.id !== branchId);
+    if (branch.id === state.branchId) {
+      state.branchId = fallbackBranch.id;
+      if (state.user) state.user.branchId = fallbackBranch.id;
+    }
     await refreshLoginUsers().catch(() => {});
+    await reloadBootstrap().catch(() => {});
+    closeModal();
+    render();
     openBranchSwitcher();
     showToast(`Філію «${branch.name}» видалено.`);
   } catch (error) {
@@ -444,7 +512,7 @@ function getClient(clientId) {
 }
 
 function getMaster(masterName) {
-  return state.masters.find((master) => master.name === masterName);
+  return getBranchItems("masters").find((master) => master.name === masterName);
 }
 
 function renderMasterAvatar(masterOrName, sizeClass = "") {
@@ -469,7 +537,7 @@ function getVisibleClients() {
       .filter((client) => client.masterNames?.includes(getCurrentMasterName()))
       .map((client) => client.id)
   );
-  state.bookings.filter((booking) => isActiveBooking(booking) && bookingBelongsToCurrentMaster(booking)).forEach((booking) => masterClientIds.add(booking.clientId));
+  state.bookings.filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && isActiveBooking(booking) && bookingBelongsToCurrentMaster(booking)).forEach((booking) => masterClientIds.add(booking.clientId));
   return state.clients.filter((client) => masterClientIds.has(client.id));
 }
 
@@ -485,6 +553,7 @@ function timeOverlaps(startA, endA, startB, endB) {
 
 function getVisibleUnavailableSlots() {
   return state.unavailableSlots.filter((slot) => {
+    if (slot.branchId && slot.branchId !== state.branchId) return false;
     if (slot.date !== state.selectedDate) return false;
     if (state.role === "master" && slot.master !== getCurrentMasterName()) return false;
     if (state.filterMaster !== "all" && slot.master !== state.filterMaster) return false;
@@ -493,11 +562,12 @@ function getVisibleUnavailableSlots() {
 }
 
 function getEditableUnavailableSlots() {
-  return state.unavailableSlots.filter((slot) => state.role !== "master" || slot.master === getCurrentMasterName());
+  return state.unavailableSlots.filter((slot) => (!slot.branchId || slot.branchId === state.branchId) && (state.role !== "master" || slot.master === getCurrentMasterName()));
 }
 
 function getVisibleBookings() {
   return state.bookings.filter((booking) => {
+    if (booking.branchId && booking.branchId !== state.branchId) return false;
     if (!isActiveBooking(booking)) return false;
     if (booking.date !== state.selectedDate) return false;
     if (state.filterMaster !== "all" && !booking.stages.some((stage) => stage.master === state.filterMaster)) return false;
@@ -508,11 +578,12 @@ function getVisibleBookings() {
 }
 
 function getProcedure(procedureId) {
-  return state.procedures.find((procedure) => procedure.id === procedureId) || state.procedures[0];
+  const procedures = getBranchItems("procedures");
+  return procedures.find((procedure) => procedure.id === procedureId) || procedures[0];
 }
 
 function getProcedureMasters(procedureId) {
-  return [...new Set(getProcedure(procedureId).resourcePlan.map((stage) => stage.master))];
+  return [...new Set((getProcedure(procedureId)?.resourcePlan || []).map((stage) => stage.master))];
 }
 
 function getClientProcedureMasters(clientId, procedureId) {
@@ -521,7 +592,7 @@ function getClientProcedureMasters(clientId, procedureId) {
   const historyMasters = new Set([
     ...(client?.masterNames || []),
     ...state.bookings
-      .filter((booking) => isActiveBooking(booking) && booking.clientId === clientId)
+      .filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && isActiveBooking(booking) && booking.clientId === clientId)
       .flatMap((booking) => booking.stages.map((stage) => stage.master))
   ]);
   return [...historyMasters].filter((masterName) => procedureMasters.has(masterName));
@@ -538,7 +609,7 @@ function getDraftNewProcedureMasters(clientId, procedureIds = bookingDraftProced
 
 function getProcedureResourceUsage(date, resourceStage) {
   const bookings = state.bookings
-    .filter((booking) => isActiveBooking(booking) && booking.date === date)
+    .filter((booking) => isActiveBooking(booking) && booking.date === date && booking.branchId === state.branchId)
     .flatMap((booking) => booking.stages
       .filter((stage) => ["master", "room", "equipment"].some((key) => stage[key] === resourceStage[key]))
       .map((stage) => ({
@@ -548,7 +619,7 @@ function getProcedureResourceUsage(date, resourceStage) {
         service: booking.service
       })));
   const unavailable = state.unavailableSlots
-    .filter((slot) => slot.date === date && slot.master === resourceStage.master)
+    .filter((slot) => slot.date === date && slot.branchId === state.branchId && slot.master === resourceStage.master)
     .map((slot) => ({ ...slot, unavailable: true }));
   return { bookings, unavailable };
 }
@@ -818,7 +889,7 @@ function updateChrome() {
 }
 
 function renderStats() {
-  const activeBookings = state.bookings.filter(isActiveBooking);
+  const activeBookings = state.bookings.filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && isActiveBooking(booking));
   const activeBookingsToday = activeBookings.filter((booking) => booking.date === state.selectedDate);
   const total = activeBookingsToday.reduce((sum, booking) => sum + booking.price, 0);
   const stats = state.role === "client" ? [
@@ -847,27 +918,35 @@ function renderStats() {
 }
 
 function renderSchedule() {
+  const viewTitle = state.view === "day"
+    ? `Розклад на ${state.selectedDate === getTodayIsoDate() ? "сьогодні" : formatLongDate(state.selectedDate)}`
+    : state.view === "week" ? "Розклад на тиждень"
+      : state.view === "month" ? `Розклад · ${formatMonthTitle(state.selectedDate)}`
+        : `Розклад · ${formatYearTitle(state.selectedDate)}`;
   return `
     <section class="panel calendar-panel" aria-labelledby="schedule-title">
       <div class="panel-head">
         <div>
           <div class="panel-kicker">Головна сцена</div>
-          <h2 class="panel-title" id="schedule-title">Розклад на сьогодні</h2>
-          <p class="panel-subtitle">${state.role === "master" ? "Ваші етапи підсвічені в загальній сітці." : "Майстри — по горизонталі, час — по вертикалі."}</p>
+          <h2 class="panel-title" id="schedule-title">${viewTitle}</h2>
+          <p class="panel-subtitle">${state.role === "master" ? "Ваші етапи підсвічені в загальній сітці." : "Виберіть будь-яку дату або період — дані відкриваються одразу."}</p>
         </div>
         <div class="toolbar-actions">
           <div class="date-nav" aria-label="Навігація за датами">
-            <button class="date-button" data-date-shift="-1" type="button" aria-label="Попередній день">‹</button>
-            <span class="date-chip">${formatScheduleDate(state.selectedDate)}</span>
-            <button class="date-button" data-date-shift="1" type="button" aria-label="Наступний день">›</button>
+            <button class="date-button" data-date-shift="-1" type="button" aria-label="Попередній період">‹</button>
+            <label class="date-picker-label"><span class="date-chip">${formatScheduleDate(state.selectedDate)}</span><input class="date-picker" id="schedule-date" type="date" value="${escapeHtml(state.selectedDate)}" aria-label="Вибрати дату" /></label>
+            <button class="date-button" data-date-shift="1" type="button" aria-label="Наступний період">›</button>
+            ${state.selectedDate !== getTodayIsoDate() ? `<button class="today-button" data-action="go-to-today" type="button">Сьогодні</button>` : ""}
           </div>
           <div class="view-toggle" aria-label="Вигляд розкладу">
             <button class="${state.view === "day" ? "active" : ""}" data-view="day" type="button">День</button>
             <button class="${state.view === "week" ? "active" : ""}" data-view="week" type="button">Тиждень</button>
+            <button class="${state.view === "month" ? "active" : ""}" data-view="month" type="button">Місяць</button>
+            <button class="${state.view === "year" ? "active" : ""}" data-view="year" type="button">Рік</button>
           </div>
         </div>
       </div>
-      ${state.view === "day" ? renderDayView() : renderWeekView()}
+      ${state.view === "day" ? renderDayView() : state.view === "week" ? renderWeekView() : state.view === "month" ? renderMonthView() : renderYearView()}
     </section>
     <aside class="right-rail" aria-label="Фокус дня">
       ${renderFocusCard()}
@@ -880,11 +959,14 @@ function renderSchedule() {
 function renderDayView() {
   const visible = getVisibleBookings();
   const scheduleMasters = getScheduleMasters();
-  const masterOptions = ["all", ...state.masters.map((master) => master.name)];
-  const roomOptions = ["all", ...state.rooms.map((room) => room.name)];
+  const masterOptions = ["all", ...getBranchItems("masters").map((master) => master.name)];
+  const roomOptions = ["all", ...getBranchItems("rooms").map((room) => room.name)];
   const timeLabels = Array.from({ length: 10 }, (_, index) => toTime(parseMinutes(salonHours.start) + index * 60));
   const hourHeight = scheduleHourHeight;
-  const nowTop = ((10 * 60 + 12 - parseMinutes(salonHours.start)) / 60) * hourHeight;
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const nowTop = ((nowMinutes - parseMinutes(salonHours.start)) / 60) * hourHeight;
+  const showNowLine = state.selectedDate === getTodayIsoDate() && nowMinutes >= parseMinutes(salonHours.start) && nowMinutes <= parseMinutes(salonHours.end);
   return `
     <div class="filter-row">
       <select class="filter-select" id="master-filter" aria-label="Фільтр за майстром">
@@ -904,16 +986,17 @@ function renderDayView() {
       <div class="timeline-body schedule-grid" style="--master-count:${scheduleMasters.length}">
         <div class="time-labels">${timeLabels.map((time) => `<div class="time-label">${time}</div>`).join("")}<div class="time-label time-label-end">${escapeHtml(salonHours.end)}</div></div>
         ${scheduleMasters.map((master) => renderMasterColumn(master, visible)).join("")}
-        <div class="schedule-now-line" style="top:${nowTop}px"><span class="now-line-label">сейчас</span></div>
+        ${showNowLine ? `<div class="schedule-now-line" style="top:${nowTop}px"><span class="now-line-label">зараз</span></div>` : ""}
       </div>
     </div>
   `;
 }
 
 function getScheduleMasters() {
-  if (state.role === "master") return state.masters.filter((master) => master.name === getCurrentMasterName());
-  if (state.filterMaster !== "all") return state.masters.filter((master) => master.name === state.filterMaster);
-  return state.masters;
+  const masters = getBranchItems("masters");
+  if (state.role === "master") return masters.filter((master) => master.name === getCurrentMasterName());
+  if (state.filterMaster !== "all") return masters.filter((master) => master.name === state.filterMaster);
+  return masters;
 }
 
 function renderMasterColumnHeader(master) {
@@ -952,19 +1035,21 @@ function renderUnavailableSlot(slot) {
 }
 
 function renderWeekView() {
-  const days = [
-    { day: "ПН", date: "31", label: "сер", iso: "2026-08-31" },
-    { day: "ВТ", date: "01", label: "вер", iso: "2026-09-01" },
-    { day: "СР", date: "02", label: "вер", iso: "2026-09-02" },
-    { day: "ЧТ", date: "03", label: "вер", iso: "2026-09-03" },
-    { day: "ПТ", date: "04", label: "вер", iso: "2026-09-04" },
-    { day: "СБ", date: "05", label: "вер", iso: "2026-09-05" },
-    { day: "НД", date: "06", label: "вер", iso: "2026-09-06" }
-  ];
+  const weekStart = startOfWeek(state.selectedDate);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const iso = addDays(weekStart, index);
+    const date = dateObject(iso);
+    return {
+      day: new Intl.DateTimeFormat("uk-UA", { weekday: "short" }).format(date).replaceAll(".", "").toUpperCase(),
+      date: new Intl.DateTimeFormat("uk-UA", { day: "2-digit" }).format(date),
+      label: new Intl.DateTimeFormat("uk-UA", { month: "short" }).format(date).replaceAll(".", ""),
+      iso
+    };
+  });
   return `<div class="week-grid">${days.map((day) => {
-    const dayBookings = state.bookings.filter((booking) => isActiveBooking(booking) && booking.date === day.iso && (state.role !== "master" || bookingBelongsToCurrentMaster(booking)));
-    const dayUnavailable = state.unavailableSlots.filter((slot) => slot.date === day.iso && (state.role !== "master" || slot.master === getCurrentMasterName()));
-    return `<div class="week-day ${day.iso === state.selectedDate ? "today" : ""}">
+    const dayBookings = calendarBookingsForDate(day.iso);
+    const dayUnavailable = calendarUnavailableForDate(day.iso);
+    return `<div class="week-day ${day.iso === state.selectedDate ? "selected" : ""} ${day.iso === getTodayIsoDate() ? "today" : ""}" data-calendar-date="${day.iso}" role="button" tabindex="0">
       <div class="week-day-top"><span>${day.day} · ${day.label}</span><strong>${day.date}</strong></div>
       ${dayUnavailable.map((slot) => `<button class="week-unavailable" data-availability="${slot.id}" type="button"><strong>${escapeHtml(slot.start)}—${escapeHtml(slot.end)}</strong><span>${escapeHtml(slot.reason)} · ${escapeHtml(slot.master)}</span></button>`).join("")}
       ${dayBookings.length ? dayBookings.slice(0, 3).map((booking) => `<button class="week-booking" data-booking="${booking.id}" type="button"><strong>${escapeHtml(booking.client)}</strong><span>${booking.start} · ${escapeHtml(booking.service)}</span></button>`).join("") : `<span class="empty-week">—</span>`}
@@ -972,8 +1057,47 @@ function renderWeekView() {
   }).join("")}</div>`;
 }
 
+function renderMonthView() {
+  const monthDate = dateObject(state.selectedDate);
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1, 12);
+  const offset = (firstDay.getDay() || 7) - 1;
+  const daysInMonth = new Date(year, month + 1, 0, 12).getDate();
+  const totalCells = Math.ceil((offset + daysInMonth) / 7) * 7;
+  const weekdays = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "НД"];
+  const cells = Array.from({ length: totalCells }, (_, index) => {
+    const date = new Date(year, month, index - offset + 1, 12);
+    const iso = toIsoDate(date);
+    const inMonth = date.getMonth() === month;
+    const bookings = inMonth ? calendarBookingsForDate(iso) : [];
+    const unavailable = inMonth ? calendarUnavailableForDate(iso) : [];
+    return `<div class="month-day-cell ${inMonth ? "" : "outside-month"} ${iso === state.selectedDate ? "selected" : ""} ${iso === getTodayIsoDate() ? "today" : ""}" data-calendar-date="${iso}" role="button" tabindex="0"><div class="month-day-head"><strong>${date.getDate()}</strong>${bookings.length || unavailable.length ? `<span>${bookings.length + unavailable.length}</span>` : ""}</div>${bookings.slice(0, 3).map((booking) => `<button class="month-event" data-booking="${escapeHtml(booking.id)}" type="button"><strong>${escapeHtml(booking.start)}</strong><span>${escapeHtml(booking.client)}</span></button>`).join("")}${unavailable.slice(0, 2).map((slot) => `<button class="month-event unavailable" data-availability="${escapeHtml(slot.id)}" type="button"><strong>${escapeHtml(slot.start)}</strong><span>${escapeHtml(slot.reason)}</span></button>`).join("")}${bookings.length + unavailable.length > 5 ? `<small class="month-more">+ ще ${bookings.length + unavailable.length - 5}</small>` : ""}</div>`;
+  });
+  return `<div class="calendar-month"><div class="calendar-weekdays">${weekdays.map((day) => `<span>${day}</span>`).join("")}</div><div class="month-grid">${cells.join("")}</div></div>`;
+}
+
+function renderYearView() {
+  const year = dateObject(state.selectedDate).getFullYear();
+  const monthNames = Array.from({ length: 12 }, (_, month) => new Intl.DateTimeFormat("uk-UA", { month: "long" }).format(new Date(year, month, 1, 12)));
+  const months = monthNames.map((name, month) => {
+    const firstDay = new Date(year, month, 1, 12);
+    const offset = (firstDay.getDay() || 7) - 1;
+    const daysInMonth = new Date(year, month + 1, 0, 12).getDate();
+    const cells = Array.from({ length: offset + daysInMonth }, (_, index) => {
+      if (index < offset) return `<span class="year-day empty"></span>`;
+      const day = index - offset + 1;
+      const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const hasActivity = calendarBookingsForDate(iso).length || calendarUnavailableForDate(iso).length;
+      return `<button class="year-day ${iso === state.selectedDate ? "selected" : ""} ${iso === getTodayIsoDate() ? "today" : ""} ${hasActivity ? "has-activity" : ""}" data-calendar-date="${iso}" type="button">${day}</button>`;
+    });
+    return `<section class="year-month"><h3>${name}</h3><div class="year-weekdays">Пн Вт Ср Чт Пт Сб Нд</div><div class="year-month-grid">${cells.join("")}</div></section>`;
+  }).join("");
+  return `<div class="year-grid">${months}</div>`;
+}
+
 function renderFocusCard() {
-  const booking = state.bookings.find(isActiveBooking);
+  const booking = state.bookings.find((item) => isActiveBooking(item) && item.date === state.selectedDate && (state.role !== "master" || bookingBelongsToCurrentMaster(item)));
   if (!booking) {
     return `<section class="focus-card"><div class="focus-head"><div><div class="panel-kicker">Ваш простір</div><h2 class="panel-title">Розклад вільний</h2></div><span class="focus-mark">✦</span></div><div class="availability-empty" style="margin-top:22px;color:#bdaab9"><strong style="color:#fff6f0">Поки немає записів</strong><span>Нові візити з’являться тут після створення.</span></div></section>`;
   }
@@ -990,7 +1114,7 @@ function renderFocusCard() {
 }
 
 function renderAttentionPanel() {
-  const attentionBookings = state.bookings.filter((booking) => isActiveBooking(booking) && booking.date === state.selectedDate && booking.status !== "confirmed" && (state.role !== "master" || bookingBelongsToCurrentMaster(booking)));
+  const attentionBookings = state.bookings.filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && isActiveBooking(booking) && booking.date === state.selectedDate && booking.status !== "confirmed" && (state.role !== "master" || bookingBelongsToCurrentMaster(booking)));
   return `
     <section class="panel side-panel">
       <div class="side-panel-head"><h2 class="side-panel-title">Потрібна увага</h2><button class="side-panel-link" data-action="show-pending" type="button">Усі ${attentionBookings.length}</button></div>
@@ -1002,13 +1126,16 @@ function renderAttentionPanel() {
 }
 
 function renderResourcesPanel() {
+  const rooms = getBranchItems("rooms");
+  const equipment = getBranchItems("equipment");
+  const masters = getBranchItems("masters");
   return `
     <section class="panel side-panel">
       <div class="side-panel-head"><h2 class="side-panel-title">Ресурси сьогодні</h2><button class="side-panel-link" data-section-link="resources" type="button">Відкрити</button></div>
       <div class="resource-summary">
-        <div class="resource-line"><div class="resource-line-copy"><span>⌂</span>Кабінети</div><span class="resource-line-status">4 / 4 готові</span></div>
-        <div class="resource-line"><div class="resource-line-copy"><span>⌘</span>Обладнання</div><span class="resource-line-status">8 / 8 готове</span></div>
-        <div class="resource-line"><div class="resource-line-copy"><span>◌</span>Майстри</div><span class="resource-line-status">3 на зміні</span></div>
+        <div class="resource-line"><div class="resource-line-copy"><span>⌂</span>Кабінети</div><span class="resource-line-status">${rooms.length} доступно</span></div>
+        <div class="resource-line"><div class="resource-line-copy"><span>⌘</span>Обладнання</div><span class="resource-line-status">${equipment.length} позицій</span></div>
+        <div class="resource-line"><div class="resource-line-copy"><span>◌</span>Майстри</div><span class="resource-line-status">${masters.length} у філії</span></div>
       </div>
     </section>
   `;
@@ -1096,9 +1223,9 @@ function renderProcedureStageFields() {
       <div class="form-grid directory-stage-fields">
         <div class="form-field"><label>Назва етапу</label><input name="stageName" value="${escapeHtml(stage.name || "")}" placeholder="Наприклад, Догляд" required /></div>
         <div class="form-field"><label>Тривалість, хв</label><input name="stageDuration" type="number" min="1" step="5" value="${escapeHtml(stage.duration || 60)}" required /></div>
-        <div class="form-field"><label>Майстер</label><select name="stageMaster" required>${selectOptions(state.masters, stage.master, (item) => `${item.name} · ${item.role}`)}</select></div>
-        <div class="form-field"><label>Кабінет</label><select name="stageRoom" required>${selectOptions(state.rooms, stage.room, (item) => `${item.name} · ${item.type}`)}</select></div>
-        <div class="form-field"><label>Обладнання</label><select name="stageEquipment" required>${selectOptions(state.equipment, stage.equipment, (item) => `${item.name} · ${item.room}`)}</select></div>
+        <div class="form-field"><label>Майстер</label><select name="stageMaster" required>${selectOptions(getBranchItems("masters"), stage.master, (item) => `${item.name} · ${item.role}`)}</select></div>
+        <div class="form-field"><label>Кабінет</label><select name="stageRoom" required>${selectOptions(getBranchItems("rooms"), stage.room, (item) => `${item.name} · ${item.type}`)}</select></div>
+        <div class="form-field"><label>Обладнання</label><select name="stageEquipment" required>${selectOptions(getBranchItems("equipment"), stage.equipment, (item) => `${item.name} · ${item.room}`)}</select></div>
         <div class="form-field"><label>Пауза після, хв</label><input name="stageGap" type="number" min="0" step="5" value="${escapeHtml(stage.gapAfter || 0)}" /></div>
       </div>
     </div>`).join("")}</div><button class="ghost-button directory-add-stage" data-action="add-procedure-stage" type="button"><span>＋</span> Додати етап</button>`;
@@ -1106,14 +1233,14 @@ function renderProcedureStageFields() {
 
 function openDirectoryModal(entity, id = "", preserveProcedureDraft = false) {
   if (state.role !== "admin") return;
-  const existing = entity === "master" ? state.masters.find((item) => item.name === id)
-    : entity === "room" ? state.rooms.find((item) => item.name === id)
-      : entity === "equipment" ? state.equipment.find((item) => item.name === id)
-        : state.procedures.find((item) => item.id === id);
+  const existing = entity === "master" ? getBranchItems("masters").find((item) => item.name === id)
+    : entity === "room" ? getBranchItems("rooms").find((item) => item.name === id)
+      : entity === "equipment" ? getBranchItems("equipment").find((item) => item.name === id)
+        : getBranchItems("procedures").find((item) => item.id === id);
   const editing = Boolean(existing);
   if (!preserveProcedureDraft) directoryDraftMeta = null;
   if (entity === "procedure" && !preserveProcedureDraft) {
-    directoryDraftStages = existing?.resourcePlan?.map((stage) => ({ ...stage })) || [{ name: "", duration: 60, master: state.masters[0]?.name || "", room: state.rooms[0]?.name || "", equipment: state.equipment[0]?.name || "", gapAfter: 0 }];
+    directoryDraftStages = existing?.resourcePlan?.map((stage) => ({ ...stage })) || [{ name: "", duration: 60, master: getBranchItems("masters")[0]?.name || "", room: getBranchItems("rooms")[0]?.name || "", equipment: getBranchItems("equipment")[0]?.name || "", gapAfter: 0 }];
   }
   const heading = editing ? `Змінити ${directoryEntityLabel(entity)}` : `Додати ${directoryEntityLabel(entity)}`;
   const subheading = { master: "Після створення майстер отримає окремий вхід у систему.", room: "Кабінет буде доступний у маршрутах процедур та розкладі.", equipment: "Обладнання можна прив’язати до будь-якого наявного кабінету.", procedure: "Налаштуйте послідовність етапів, майстрів, кабінетів і обладнання." }[entity];
@@ -1124,7 +1251,7 @@ function openDirectoryModal(entity, id = "", preserveProcedureDraft = false) {
   } else if (entity === "room") {
     body = `<div class="form-grid"><div class="form-field"><label for="directory-name">Назва кабінету</label><input id="directory-name" name="name" value="${escapeHtml(existing?.name || "")}" ${editing ? "readonly" : ""} placeholder="Каб. 4" required /></div><div class="form-field"><label for="directory-type">Призначення</label><input id="directory-type" name="type" value="${escapeHtml(existing?.type || "")}" placeholder="Естетика" required /></div><div class="form-field"><label for="directory-status">Статус</label><select id="directory-status" name="status">${["Вільний", "До 10:20", "На обслуговуванні"].map((status) => `<option ${status === (existing?.status || "Вільний") ? "selected" : ""}>${status}</option>`).join("")}</select></div><div class="form-field full"><label for="directory-detail">Оснащення / примітка</label><input id="directory-detail" name="detail" value="${escapeHtml(existing?.detail || "")}" placeholder="Кушетка · лампа" /></div></div>`;
   } else if (entity === "equipment") {
-    body = `<div class="form-grid"><div class="form-field"><label for="directory-name">Назва обладнання</label><input id="directory-name" name="name" value="${escapeHtml(existing?.name || "")}" ${editing ? "readonly" : ""} placeholder="LED-маска Pro" required /></div><div class="form-field"><label for="directory-type">Тип</label><input id="directory-type" name="type" value="${escapeHtml(existing?.type || "")}" placeholder="LED-терапія" required /></div><div class="form-field"><label for="directory-room">Кабінет</label><select id="directory-room" name="room" required>${selectOptions(state.rooms, existing?.room, (item) => `${item.name} · ${item.type}`)}</select></div><div class="form-field"><label for="directory-status">Статус</label><select id="directory-status" name="status">${["Готове", "На обслуговуванні", "Недоступне"].map((status) => `<option ${status === (existing?.status || "Готове") ? "selected" : ""}>${status}</option>`).join("")}</select></div></div>`;
+    body = `<div class="form-grid"><div class="form-field"><label for="directory-name">Назва обладнання</label><input id="directory-name" name="name" value="${escapeHtml(existing?.name || "")}" ${editing ? "readonly" : ""} placeholder="LED-маска Pro" required /></div><div class="form-field"><label for="directory-type">Тип</label><input id="directory-type" name="type" value="${escapeHtml(existing?.type || "")}" placeholder="LED-терапія" required /></div><div class="form-field"><label for="directory-room">Кабінет</label><select id="directory-room" name="room" required>${selectOptions(getBranchItems("rooms"), existing?.room, (item) => `${item.name} · ${item.type}`)}</select></div><div class="form-field"><label for="directory-status">Статус</label><select id="directory-status" name="status">${["Готове", "На обслуговуванні", "Недоступне"].map((status) => `<option ${status === (existing?.status || "Готове") ? "selected" : ""}>${status}</option>`).join("")}</select></div></div>`;
   } else {
     body = `<div class="form-grid"><div class="form-field"><label for="directory-name">Назва процедури</label><input id="directory-name" name="name" value="${escapeHtml((preserveProcedureDraft ? directoryDraftMeta?.name : existing?.name) || "")}" required /></div><div class="form-field"><label for="directory-category">Категорія</label><input id="directory-category" name="category" value="${escapeHtml((preserveProcedureDraft ? directoryDraftMeta?.category : existing?.category) || "")}" placeholder="Доглядові процедури" required /></div><div class="form-field"><label for="directory-price">Вартість, ₴</label><input id="directory-price" name="price" type="number" min="0" step="50" value="${escapeHtml((preserveProcedureDraft ? directoryDraftMeta?.price : existing?.price) ?? 0)}" required /></div><div class="form-field"><label>Тривалість</label><div class="settings-detail directory-derived-value"><span>Розраховується з етапів</span><strong>${escapeHtml(existing?.duration || "—")}</strong></div></div></div><div class="directory-stage-editor"><div class="directory-stage-editor-head"><div><div class="panel-kicker">Маршрут процедури</div><strong>Етапи та ресурси</strong></div><span class="tag">${directoryDraftStages.length} ${directoryDraftStages.length === 1 ? "етап" : "етапи"}</span></div>${renderProcedureStageFields()}</div>`;
   }
@@ -1188,19 +1315,23 @@ function renderDirectory(section) {
 }
 
 function renderProcedures() {
-  return `<div class="directory-grid"><section class="panel directory-table"><div class="table-row header"><span>Назва процедури</span><span>Нормогодини</span><span>Вартість</span><span>Керування</span></div>${state.procedures.length ? state.procedures.map((procedure) => `<div class="table-row directory-data-row"><strong>${escapeHtml(procedure.name)}<small>${escapeHtml(procedure.category)}</small></strong><span>${escapeHtml(procedure.duration)}</span><span class="price-cell">${formatMoney(procedure.price)}<small>${procedure.stages} ${procedure.stages === 1 ? "етап" : "етапи"}</small></span><span class="directory-actions"><button class="icon-button" data-directory-edit="procedure" data-directory-id="${escapeHtml(procedure.id)}" type="button" aria-label="Змінити процедуру">✎</button><button class="icon-button directory-delete" data-directory-delete="procedure" data-directory-id="${escapeHtml(procedure.id)}" type="button" aria-label="Видалити процедуру">×</button></span></div>`).join("") : `<div class="empty-directory">Поки немає процедур.</div>`}</section><section class="panel side-panel"><div class="side-panel-head"><h2 class="side-panel-title">Зв’язок етапів</h2><span class="verified">${state.procedures.length} налаштовано</span></div><p class="panel-subtitle" style="margin-bottom:15px">Оберіть процедуру, щоб змінити її маршрут і ресурси.</p><div class="mini-list">${state.procedures.slice(0, 3).map((procedure) => `<div class="mini-list-item"><span class="builder-stage-number">${String(procedure.stages).padStart(2, "0")}</span><span class="mini-list-copy"><strong>${escapeHtml(procedure.name)}</strong><span>${escapeHtml(procedure.relation)}</span></span><span class="mini-count">${formatMoney(procedure.price)}</span></div>`).join("") || `<div class="availability-empty"><strong>Додайте першу процедуру</strong><span>Маршрут з’явиться тут.</span></div>`}</div><div class="conflict-check" style="margin-top:19px">Послідовність і ресурси перевіряються сервером</div></section></div>`;
+  const procedures = getBranchItems("procedures");
+  return `<div class="directory-grid"><section class="panel directory-table"><div class="table-row header"><span>Назва процедури</span><span>Нормогодини</span><span>Вартість</span><span>Керування</span></div>${procedures.length ? procedures.map((procedure) => `<div class="table-row directory-data-row"><strong>${escapeHtml(procedure.name)}<small>${escapeHtml(procedure.category)}</small></strong><span>${escapeHtml(procedure.duration)}</span><span class="price-cell">${formatMoney(procedure.price)}<small>${procedure.stages} ${procedure.stages === 1 ? "етап" : "етапи"}</small></span><span class="directory-actions"><button class="icon-button" data-directory-edit="procedure" data-directory-id="${escapeHtml(procedure.id)}" type="button" aria-label="Змінити процедуру">✎</button><button class="icon-button directory-delete" data-directory-delete="procedure" data-directory-id="${escapeHtml(procedure.id)}" type="button" aria-label="Видалити процедуру">×</button></span></div>`).join("") : `<div class="empty-directory">Поки немає процедур.</div>`}</section><section class="panel side-panel"><div class="side-panel-head"><h2 class="side-panel-title">Зв’язок етапів</h2><span class="verified">${procedures.length} налаштовано</span></div><p class="panel-subtitle" style="margin-bottom:15px">Оберіть процедуру, щоб змінити її маршрут і ресурси.</p><div class="mini-list">${procedures.slice(0, 3).map((procedure) => `<div class="mini-list-item"><span class="builder-stage-number">${String(procedure.stages).padStart(2, "0")}</span><span class="mini-list-copy"><strong>${escapeHtml(procedure.name)}</strong><span>${escapeHtml(procedure.relation)}</span></span><span class="mini-count">${formatMoney(procedure.price)}</span></div>`).join("") || `<div class="availability-empty"><strong>Додайте першу процедуру</strong><span>Маршрут з’явиться тут.</span></div>`}</div><div class="conflict-check" style="margin-top:19px">Послідовність і ресурси перевіряються сервером</div></section></div>`;
 }
 
 function renderResources() {
-  return `<div class="directory-grid"><section class="panel directory-table"><div class="side-panel-head directory-inner-head"><div><h2 class="side-panel-title">Кабінети</h2><p class="panel-subtitle">Простір, у якому проходять етапи процедур.</p></div>${state.role === "admin" ? `<button class="side-panel-link" data-action="add-room" type="button">＋ Додати</button>` : ""}</div><div class="table-row header"><span>Кабінет</span><span>Призначення</span><span>Статус</span><span>Керування</span></div>${state.rooms.length ? state.rooms.map((room) => `<div class="table-row directory-data-row"><strong>${escapeHtml(room.name)}<small>${escapeHtml(room.detail || "Без примітки")}</small></strong><span>${escapeHtml(room.type)}</span><span class="tag">${escapeHtml(room.status)}</span><span class="directory-actions">${state.role === "admin" ? `<button class="icon-button" data-directory-edit="room" data-directory-id="${escapeHtml(room.name)}" type="button" aria-label="Змінити кабінет">✎</button><button class="icon-button directory-delete" data-directory-delete="room" data-directory-id="${escapeHtml(room.name)}" type="button" aria-label="Видалити кабінет">×</button>` : ""}</span></div>`).join("") : `<div class="empty-directory">Поки немає кабінетів.</div>`}</section><section class="panel resource-card"><div class="side-panel-head"><div><h2 class="side-panel-title">Обладнання</h2><p class="panel-subtitle">${state.equipment.length} позицій у довіднику</p></div>${state.role === "admin" ? `<button class="side-panel-link" data-action="add-equipment" type="button">＋ Додати</button>` : ""}</div><div class="mini-list">${state.equipment.length ? state.equipment.map((item) => `<div class="mini-list-item directory-mini-row"><span class="resource-line-copy"><span>⌘</span></span><span class="mini-list-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.type)} · ${escapeHtml(item.room)}</span></span><span class="resource-line-status">${escapeHtml(item.status)}</span>${state.role === "admin" ? `<span class="directory-actions"><button class="icon-button" data-directory-edit="equipment" data-directory-id="${escapeHtml(item.name)}" type="button" aria-label="Змінити обладнання">✎</button><button class="icon-button directory-delete" data-directory-delete="equipment" data-directory-id="${escapeHtml(item.name)}" type="button" aria-label="Видалити обладнання">×</button></span>` : ""}</div>`).join("") : `<div class="availability-empty"><strong>Поки немає обладнання</strong><span>Додайте першу позицію.</span></div>`}</div></section></div>`;
+  const rooms = getBranchItems("rooms");
+  const equipment = getBranchItems("equipment");
+  return `<div class="directory-grid"><section class="panel directory-table"><div class="side-panel-head directory-inner-head"><div><h2 class="side-panel-title">Кабінети</h2><p class="panel-subtitle">Простір, у якому проходять етапи процедур.</p></div>${state.role === "admin" ? `<button class="side-panel-link" data-action="add-room" type="button">＋ Додати</button>` : ""}</div><div class="table-row header"><span>Кабінет</span><span>Призначення</span><span>Статус</span><span>Керування</span></div>${rooms.length ? rooms.map((room) => `<div class="table-row directory-data-row"><strong>${escapeHtml(room.name)}<small>${escapeHtml(room.detail || "Без примітки")}</small></strong><span>${escapeHtml(room.type)}</span><span class="tag">${escapeHtml(room.status)}</span><span class="directory-actions">${state.role === "admin" ? `<button class="icon-button" data-directory-edit="room" data-directory-id="${escapeHtml(room.name)}" type="button" aria-label="Змінити кабінет">✎</button><button class="icon-button directory-delete" data-directory-delete="room" data-directory-id="${escapeHtml(room.name)}" type="button" aria-label="Видалити кабінет">×</button>` : ""}</span></div>`).join("") : `<div class="empty-directory">Поки немає кабінетів.</div>`}</section><section class="panel resource-card"><div class="side-panel-head"><div><h2 class="side-panel-title">Обладнання</h2><p class="panel-subtitle">${equipment.length} позицій у довіднику</p></div>${state.role === "admin" ? `<button class="side-panel-link" data-action="add-equipment" type="button">＋ Додати</button>` : ""}</div><div class="mini-list">${equipment.length ? equipment.map((item) => `<div class="mini-list-item directory-mini-row"><span class="resource-line-copy"><span>⌘</span></span><span class="mini-list-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.type)} · ${escapeHtml(item.room)}</span></span><span class="resource-line-status">${escapeHtml(item.status)}</span>${state.role === "admin" ? `<span class="directory-actions"><button class="icon-button" data-directory-edit="equipment" data-directory-id="${escapeHtml(item.name)}" type="button" aria-label="Змінити обладнання">✎</button><button class="icon-button directory-delete" data-directory-delete="equipment" data-directory-id="${escapeHtml(item.name)}" type="button" aria-label="Видалити обладнання">×</button></span>` : ""}</div>`).join("") : `<div class="availability-empty"><strong>Поки немає обладнання</strong><span>Додайте першу позицію.</span></div>`}</div></section></div>`;
 }
 
 function renderTeam() {
   const visibleSlots = getEditableUnavailableSlots().filter((slot) => slot.date === state.selectedDate);
-  const masterRows = state.role === "master" ? state.masters.filter((master) => master.name === getCurrentMasterName()) : state.masters;
+  const branchMasters = getBranchItems("masters");
+  const masterRows = state.role === "master" ? branchMasters.filter((master) => master.name === getCurrentMasterName()) : branchMasters;
   const admins = demoUsers.admin || [];
   const adminPanel = state.role === "admin" ? `<section class="panel resource-card admin-panel"><div class="side-panel-head"><div><h2 class="side-panel-title">Адміністратори</h2><p class="panel-subtitle">${admins.length} ${admins.length === 1 ? "адміністратор" : "адміністратори"} мають доступ до системи</p></div><button class="side-panel-link" data-action="add-admin" type="button">＋ Додати</button></div><div class="mini-list">${admins.length ? admins.map((admin) => `<div class="mini-list-item directory-admin-row"><div class="avatar avatar-peach">${escapeHtml(admin.initials || initials(admin.name))}</div><span class="mini-list-copy"><strong>${escapeHtml(admin.name)}${admin.id === state.user?.id ? " · ви" : ""}</strong><span>${escapeHtml(admin.email)}${admin.phone ? ` · ${escapeHtml(admin.phone)}` : ""}</span></span><span class="tag">${escapeHtml(state.branches.find((branch) => branch.id === admin.branchId)?.name || "Філія")}</span><span class="directory-actions"><button class="icon-button directory-delete" data-admin-delete="${escapeHtml(admin.id)}" type="button" aria-label="Видалити адміністратора" ${admin.id === state.user?.id ? "disabled" : ""}>×</button></span></div>`).join("") : `<div class="availability-empty"><strong>Поки немає адміністраторів</strong><span>Додайте першого адміністратора.</span></div>`}</div></section>` : "";
-  return `<div class="directory-grid team-grid"><section class="panel resource-card"><div class="side-panel-head"><div><h2 class="side-panel-title">Майстри</h2><p class="panel-subtitle">${masterRows.length} ${masterRows.length === 1 ? "майстер" : "майстри"} у команді</p></div></div><div class="mini-list">${masterRows.length ? masterRows.map((master) => `<div class="mini-list-item directory-master-row"><div class="master-profile-photo">${renderMasterAvatar(master, "master-avatar-md")}</div><span class="mini-list-copy"><strong>${escapeHtml(master.name)}</strong><span>${escapeHtml(master.role)} · ${escapeHtml(master.focus)}</span></span><span class="tag">${escapeHtml(master.schedule)}</span>${state.role === "admin" ? `<span class="directory-actions"><button class="icon-button" data-directory-edit="master" data-directory-id="${escapeHtml(master.name)}" type="button" aria-label="Змінити майстра">✎</button><button class="icon-button directory-delete" data-directory-delete="master" data-directory-id="${escapeHtml(master.name)}" type="button" aria-label="Видалити майстра">×</button></span>` : ""}</div>`).join("") : `<div class="availability-empty"><strong>Поки немає майстрів</strong><span>Додайте першого майстра.</span></div>`}</div></section>${adminPanel}<section class="panel side-panel availability-panel"><div class="side-panel-head"><div><h2 class="side-panel-title">Неробочий час</h2><p class="panel-subtitle">${state.selectedDate === "2026-09-04" ? "04 вересня · сьогодні" : escapeHtml(state.selectedDate)}</p></div><span class="tag">${visibleSlots.length} ${visibleSlots.length === 1 ? "інтервал" : "інтервали"}</span></div>${visibleSlots.length ? `<div class="availability-list">${visibleSlots.map((slot) => `<div class="availability-row"><div class="availability-row-time">${escapeHtml(slot.start)}—${escapeHtml(slot.end)}</div><div class="availability-row-copy"><strong>${escapeHtml(slot.reason)}</strong><span>${renderMasterAvatar(slot.master, "master-avatar-xs")} ${escapeHtml(slot.master)}</span></div><button class="icon-button availability-edit" data-availability="${slot.id}" type="button" aria-label="Змінити неробочий час">✎</button></div>`).join("")}</div>` : `<div class="availability-empty"><strong>Немає заблокованих інтервалів</strong><span>Додайте перерву або час для відлучки.</span></div>`}<button class="ghost-button availability-add-secondary" data-action="add-availability" type="button"><span>＋</span> Додати інтервал</button></section><section class="panel side-panel"><div class="side-panel-head"><h2 class="side-panel-title">Графік сьогодні</h2><span class="verified">${masterRows.length} на зміні</span></div><div class="mini-list">${masterRows.map((master) => `<div class="mini-list-item">${renderMasterAvatar(master, "master-avatar-xs")}<span class="mini-list-copy"><strong>${escapeHtml(master.name)}</strong><span>${escapeHtml(master.schedule)} · ${state.bookings.filter((booking) => isActiveBooking(booking) && booking.date === state.selectedDate && booking.stages.some((stage) => stage.master === master.name)).length} записів</span></span></div>`).join("")}</div></section></div>`;
+  return `<div class="directory-grid team-grid"><section class="panel resource-card"><div class="side-panel-head"><div><h2 class="side-panel-title">Майстри</h2><p class="panel-subtitle">${masterRows.length} ${masterRows.length === 1 ? "майстер" : "майстри"} у команді</p></div></div><div class="mini-list">${masterRows.length ? masterRows.map((master) => `<div class="mini-list-item directory-master-row"><div class="master-profile-photo">${renderMasterAvatar(master, "master-avatar-md")}</div><span class="mini-list-copy"><strong>${escapeHtml(master.name)}</strong><span>${escapeHtml(master.role)} · ${escapeHtml(master.focus)}</span></span><span class="tag">${escapeHtml(master.schedule)}</span>${state.role === "admin" ? `<span class="directory-actions"><button class="icon-button" data-directory-edit="master" data-directory-id="${escapeHtml(master.name)}" type="button" aria-label="Змінити майстра">✎</button><button class="icon-button directory-delete" data-directory-delete="master" data-directory-id="${escapeHtml(master.name)}" type="button" aria-label="Видалити майстра">×</button></span>` : ""}</div>`).join("") : `<div class="availability-empty"><strong>Поки немає майстрів</strong><span>Додайте першого майстра.</span></div>`}</div></section>${adminPanel}<section class="panel side-panel availability-panel"><div class="side-panel-head"><div><h2 class="side-panel-title">Неробочий час</h2><p class="panel-subtitle">${state.selectedDate === getTodayIsoDate() ? `${formatShortDate(state.selectedDate)} · сьогодні` : escapeHtml(state.selectedDate)}</p></div><span class="tag">${visibleSlots.length} ${visibleSlots.length === 1 ? "інтервал" : "інтервали"}</span></div>${visibleSlots.length ? `<div class="availability-list">${visibleSlots.map((slot) => `<div class="availability-row"><div class="availability-row-time">${escapeHtml(slot.start)}—${escapeHtml(slot.end)}</div><div class="availability-row-copy"><strong>${escapeHtml(slot.reason)}</strong><span>${renderMasterAvatar(slot.master, "master-avatar-xs")} ${escapeHtml(slot.master)}</span></div><button class="icon-button availability-edit" data-availability="${slot.id}" type="button" aria-label="Змінити неробочий час">✎</button></div>`).join("")}</div>` : `<div class="availability-empty"><strong>Немає заблокованих інтервалів</strong><span>Додайте перерву або час для відлучки.</span></div>`}<button class="ghost-button availability-add-secondary" data-action="add-availability" type="button"><span>＋</span> Додати інтервал</button></section><section class="panel side-panel"><div class="side-panel-head"><h2 class="side-panel-title">Графік сьогодні</h2><span class="verified">${masterRows.length} на зміні</span></div><div class="mini-list">${masterRows.map((master) => `<div class="mini-list-item">${renderMasterAvatar(master, "master-avatar-xs")}<span class="mini-list-copy"><strong>${escapeHtml(master.name)}</strong><span>${escapeHtml(master.schedule)} · ${state.bookings.filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && isActiveBooking(booking) && booking.date === state.selectedDate && booking.stages.some((stage) => stage.master === master.name)).length} записів</span></span></div>`).join("")}</div></section></div>`;
 }
 
 function renderClients() {
@@ -1228,7 +1359,7 @@ function renderClientPortal() {
     initials: state.user?.initials || "К",
     phone: state.user?.phone || ""
   };
-  const upcoming = state.bookings.find(isActiveBooking);
+  const upcoming = state.bookings.find((booking) => (!booking.branchId || booking.branchId === state.branchId) && isActiveBooking(booking));
   if (!upcoming) {
     return `<section class="client-view"><section class="panel client-hero"><div class="avatar">${escapeHtml(client.initials)}</div><div class="client-hero-copy"><h2>${escapeHtml(client.name)}</h2><p>${escapeHtml(client.phone || "Ваш особистий кабінет")}</p></div><div class="client-hero-actions"><button class="ghost-button" data-action="open-settings" type="button">Мій профіль</button></div></section><section class="panel client-empty-state"><div class="portal-label">Філія · ${escapeHtml(getCurrentBranch().name)}</div><h2>У цій філії ще немає записів</h2><p>Оберіть іншу філію або зв’яжіться із салоном, щоб підібрати зручний час.</p><div class="client-empty-actions"><button class="ghost-button" data-action="open-branch-switcher" type="button">Обрати іншу філію</button><button class="primary-button" data-action="contact" type="button">Зв’язатися із салоном</button></div></section><section class="panel side-panel"><div class="portal-label">Історія</div><h2 class="side-panel-title" style="margin-top:7px">Візити з’являться тут</h2><p class="panel-subtitle" style="margin-top:7px">Після створення запису в обраній філії тут будуть доступні деталі маршруту та підтвердження.</p></section></section>`;
   }
@@ -1314,19 +1445,19 @@ function conflictsFor(candidate, date, excludedBookingId = "") {
     conflicts.push(`Студія працює з ${salonHours.start} до ${salonHours.end}`);
   }
   candidate.stages.forEach((stage) => {
-    const master = state.masters.find((item) => item.name === stage.master);
+    const master = getBranchItems("masters").find((item) => item.name === stage.master);
     if (!master) return;
     const [scheduleStart, scheduleEnd] = master.schedule.split("–");
     if (parseMinutes(stage.start) < parseMinutes(scheduleStart) || parseMinutes(stage.end) > parseMinutes(scheduleEnd)) {
       conflicts.push(`${stage.master}: робочі години ${master.schedule}`);
     }
-    state.unavailableSlots.filter((slot) => slot.date === date && slot.master === stage.master).forEach((slot) => {
+    state.unavailableSlots.filter((slot) => (!slot.branchId || slot.branchId === state.branchId) && slot.date === date && slot.master === stage.master).forEach((slot) => {
       if (timeOverlaps(stage.start, stage.end, slot.start, slot.end)) {
         conflicts.push(`${stage.master}: неробочий час ${slot.start}—${slot.end}${slot.reason ? ` (${slot.reason.toLowerCase()})` : ""}`);
       }
     });
   });
-  state.bookings.filter((booking) => isActiveBooking(booking) && booking.date === date && booking.id !== excludedBookingId).forEach((booking) => {
+  state.bookings.filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && isActiveBooking(booking) && booking.date === date && booking.id !== excludedBookingId).forEach((booking) => {
     candidate.stages.forEach((newStage) => {
       booking.stages.forEach((oldStage) => {
         const timeOverlap = parseMinutes(newStage.start) < parseMinutes(oldStage.end) && parseMinutes(newStage.end) > parseMinutes(oldStage.start);
@@ -1392,7 +1523,7 @@ function syncReschedulePreview() {
 
 function bookingConflictsForUnavailable(slot) {
   return state.bookings
-    .filter((booking) => booking.date === slot.date)
+    .filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && booking.date === slot.date)
     .flatMap((booking) => booking.stages
       .filter((stage) => stage.master === slot.master && timeOverlaps(slot.start, slot.end, stage.start, stage.end))
       .map((stage) => `${booking.client} має запис ${stage.start}—${stage.end}`));
@@ -1404,8 +1535,9 @@ function openBookingModal() {
   bookingDraftOffsets = {};
   const availableClients = getVisibleClients();
   const clientOptions = availableClients.map((client) => `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name)}${client.note === "Новий клієнт" ? " · новий клієнт" : ""}</option>`).join("");
-  const procedureOptions = state.procedures.map((procedure) => `<option value="${escapeHtml(procedure.id)}">${escapeHtml(procedure.name)} · ${procedure.stages} ${procedure.stages === 1 ? "етап" : "етапи"}</option>`).join("");
-  $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Новий запис</div><h2 id="modal-title">Зібрати візит</h2><p>Оберіть процедуру, перевірте доступність і додайте її до візиту.</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><form class="modal-form" id="booking-form"><div class="form-grid"><div class="form-field full"><label for="booking-client">Клієнт</label><select id="booking-client" name="client" ${clientOptions ? "" : "disabled"}>${clientOptions || "<option>Немає доступних клієнтів</option>"}</select>${state.role === "master" ? `<small class="field-hint">Ви бачите лише клієнтів зі своїми записами.</small>` : ""}</div><div class="form-field full"><label for="booking-procedure">Процедура для додавання</label><div class="procedure-picker"><select id="booking-procedure" name="procedure">${procedureOptions}</select><button class="ghost-button add-procedure-button" data-action="add-procedure-to-visit" type="button"><span>＋</span> Додати до візиту</button></div><small class="field-hint">Після додавання процедура з’явиться в таймлайні нижче. Там її можна видалити або перемістити.</small><div id="booking-master-preference"></div></div><div class="form-field"><label for="booking-date">Дата</label><input id="booking-date" name="date" type="date" value="${escapeHtml(state.selectedDate)}" required /></div><div class="form-field"><label for="booking-start">Початок маршруту</label><input id="booking-start" name="start" type="time" value="12:00" step="900" required /></div></div><section class="procedure-timeline-panel" id="booking-procedure-timeline" aria-live="polite" aria-labelledby="procedure-timeline-title"></section><div class="booking-builder"><div class="builder-head"><strong>Маршрут доданих процедур</strong><span class="builder-total" id="builder-total">Додайте процедуру</span></div><div id="builder-stage-list"></div><div class="conflict-check warning" id="booking-check">Додайте хоча б одну процедуру до візиту</div></div><div class="form-field full" style="margin-top:14px"><label for="booking-note">Нотатка для команди</label><textarea id="booking-note" name="note" placeholder="Наприклад: повторити минулий протокол догляду"></textarea></div><div class="modal-actions"><button class="ghost-button" data-close-modal type="button">Скасувати</button><button class="primary-button" id="submit-booking" type="submit" ${clientOptions ? "" : "disabled"}><span>＋</span> Зберегти запис</button></div></form>`;
+  const procedures = getBranchItems("procedures");
+  const procedureOptions = procedures.map((procedure) => `<option value="${escapeHtml(procedure.id)}">${escapeHtml(procedure.name)} · ${procedure.stages} ${procedure.stages === 1 ? "етап" : "етапи"}</option>`).join("");
+  $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Новий запис</div><h2 id="modal-title">Зібрати візит</h2><p>Оберіть процедуру, перевірте доступність і додайте її до візиту.</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><form class="modal-form" id="booking-form"><div class="form-grid"><div class="form-field full"><label for="booking-client">Клієнт</label><select id="booking-client" name="client" ${clientOptions ? "" : "disabled"}>${clientOptions || "<option>Немає доступних клієнтів</option>"}</select>${state.role === "master" ? `<small class="field-hint">Ви бачите лише клієнтів зі своїми записами.</small>` : ""}</div><div class="form-field full"><label for="booking-procedure">Процедура для додавання</label><div class="procedure-picker"><select id="booking-procedure" name="procedure" ${procedures.length ? "" : "disabled"}>${procedureOptions || "<option>У цій філії ще немає процедур</option>"}</select><button class="ghost-button add-procedure-button" data-action="add-procedure-to-visit" type="button" ${procedures.length ? "" : "disabled"}><span>＋</span> Додати до візиту</button></div><small class="field-hint">Після додавання процедура з’явиться в таймлайні нижче. Там її можна видалити або перемістити.</small><div id="booking-master-preference"></div></div><div class="form-field"><label for="booking-date">Дата</label><input id="booking-date" name="date" type="date" value="${escapeHtml(state.selectedDate)}" required /></div><div class="form-field"><label for="booking-start">Початок маршруту</label><input id="booking-start" name="start" type="time" value="12:00" step="900" required /></div></div><section class="procedure-timeline-panel" id="booking-procedure-timeline" aria-live="polite" aria-labelledby="procedure-timeline-title"></section><div class="booking-builder"><div class="builder-head"><strong>Маршрут доданих процедур</strong><span class="builder-total" id="builder-total">Додайте процедуру</span></div><div id="builder-stage-list"></div><div class="conflict-check warning" id="booking-check">Додайте хоча б одну процедуру до візиту</div></div><div class="form-field full" style="margin-top:14px"><label for="booking-note">Нотатка для команди</label><textarea id="booking-note" name="note" placeholder="Наприклад: повторити минулий протокол догляду"></textarea></div><div class="modal-actions"><button class="ghost-button" data-close-modal type="button">Скасувати</button><button class="primary-button" id="submit-booking" type="submit" ${clientOptions && procedures.length ? "" : "disabled"}><span>＋</span> Зберегти запис</button></div></form>`;
   showModal();
   syncBookingBuilder();
 }
@@ -1415,7 +1547,7 @@ function openAvailabilityModal(slotId = "") {
   const slot = getEditableUnavailableSlots().find((item) => item.id === slotId);
   if (slotId && !slot) return;
   const isEditing = Boolean(slot);
-  const masterOptions = state.role === "master" ? state.masters.filter((master) => master.name === getCurrentMasterName()) : state.masters;
+  const masterOptions = state.role === "master" ? getBranchItems("masters").filter((master) => master.name === getCurrentMasterName()) : getBranchItems("masters");
   const selectedMaster = slot?.master || masterOptions[0]?.name || getCurrentMasterName();
   const reasons = ["Перерва", "Відлучка", "Особиста справа", "Інше"];
   $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Розклад майстра</div><h2 id="modal-title">${isEditing ? "Змінити неробочий час" : "Додати неробочий час"}</h2><p>Цей інтервал буде виключено з доступного часу для нових записів.</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><form class="modal-form" id="availability-form" data-availability-id="${slot?.id || ""}"><div class="form-grid"><div class="form-field full"><label for="availability-master">Майстер</label><select id="availability-master" name="master" ${state.role === "master" ? "disabled" : ""}>${masterOptions.map((master) => `<option value="${escapeHtml(master.name)}" ${master.name === selectedMaster ? "selected" : ""}>${escapeHtml(master.name)} · ${escapeHtml(master.role)}</option>`).join("")}</select>${state.role === "master" ? `<input type="hidden" name="master" value="${escapeHtml(getCurrentMasterName())}" />` : ""}</div><div class="form-field"><label for="availability-date">Дата</label><input id="availability-date" name="date" type="date" value="${escapeHtml(slot?.date || state.selectedDate)}" required /></div><div class="form-field"><label for="availability-reason">Причина</label><select id="availability-reason" name="reason">${reasons.map((reason) => `<option value="${escapeHtml(reason)}" ${reason === (slot?.reason || "Перерва") ? "selected" : ""}>${escapeHtml(reason)}</option>`).join("")}</select></div><div class="form-field"><label for="availability-start">Початок</label><input id="availability-start" name="start" type="time" value="${escapeHtml(slot?.start || "12:00")}" step="900" required /></div><div class="form-field"><label for="availability-end">Завершення</label><input id="availability-end" name="end" type="time" value="${escapeHtml(slot?.end || "12:30")}" step="900" required /></div></div><div class="availability-form-note"><span>i</span><p>Години студії: ${salonHours.start}—${salonHours.end}. Запис поверх цього часу система не дозволить.</p></div><div class="modal-actions">${isEditing ? `<button class="danger-button" data-availability-delete="${slot.id}" type="button">Видалити</button>` : ""}<button class="ghost-button" data-close-modal type="button">Скасувати</button><button class="primary-button" type="submit"><span>✓</span> ${isEditing ? "Зберегти зміни" : "Заблокувати час"}</button></div></form>`;
@@ -1510,7 +1642,7 @@ async function cancelBooking(bookingId) {
 function openClientHistory(clientId) {
   const client = getClient(clientId);
   if (!client || (state.role === "master" && !getVisibleClients().some((item) => item.id === client.id))) return;
-  const clientBookings = state.bookings.filter((booking) => booking.clientId === client.id && (state.role !== "master" || bookingBelongsToCurrentMaster(booking)));
+  const clientBookings = state.bookings.filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && booking.clientId === client.id && (state.role !== "master" || bookingBelongsToCurrentMaster(booking)));
   $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Картка клієнта</div><h2 id="modal-title">${escapeHtml(client.name)}</h2><p>${escapeHtml(client.phone)} · ${client.visits} візитів · ${formatMoney(client.total)}</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><div class="modal-form"><div class="client-hero" style="padding:14px;background:var(--cream);border-radius:12px"><div class="avatar">${client.initials}</div><div class="client-hero-copy"><h2 style="font-size:19px">Нотатка команди</h2><p>${escapeHtml(client.note || "Поки немає нотаток про клієнта.")}</p></div></div><div class="history-list">${clientBookings.length ? clientBookings.map((booking) => `<div class="history-row"><span class="history-date">${formatShortDate(booking.date)}</span><span class="history-copy"><strong>${escapeHtml(booking.service)}</strong><span>${booking.stages.map((stage) => escapeHtml(stage.master)).join(" + ")}</span></span><span class="history-price">${formatMoney(booking.price)}</span></div>`).join("") : `<p class="panel-subtitle">Історія з’явиться після першого візиту.</p>`}</div><div class="modal-actions"><button class="ghost-button" data-close-modal type="button">Закрити</button><button class="primary-button" data-action="new-booking-from-history" type="button"><span>＋</span> Новий запис</button></div></div>`;
   showModal();
 }
@@ -1641,6 +1773,12 @@ document.addEventListener("click", async (event) => {
     openBookingDetails(bookingButton.dataset.booking);
     return;
   }
+  const calendarDateCell = event.target.closest("[data-calendar-date]");
+  if (calendarDateCell) {
+    state.selectedDate = calendarDateCell.dataset.calendarDate;
+    render();
+    return;
+  }
   const clientButton = event.target.closest("[data-client-history]");
   if (clientButton) {
     openClientHistory(clientButton.dataset.clientHistory);
@@ -1672,7 +1810,8 @@ document.addEventListener("click", async (event) => {
   }
   const shiftButton = event.target.closest("[data-date-shift]");
   if (shiftButton) {
-    showToast(shiftButton.dataset.dateShift === "1" ? "Наступний день буде доступний після синхронізації календаря." : "Попередній день буде доступний після синхронізації календаря.");
+    state.selectedDate = shiftScheduleDate(state.selectedDate, Number(shiftButton.dataset.dateShift));
+    render();
     return;
   }
   const action = event.target.closest("[data-action]")?.dataset.action;
@@ -1683,6 +1822,9 @@ document.addEventListener("click", async (event) => {
     render();
   } else if (action === "logout") {
     await logoutFromSystem();
+  } else if (action === "go-to-today") {
+    state.selectedDate = getTodayIsoDate();
+    render();
   } else if (action === "add-procedure-to-visit") {
     const procedureId = $("#booking-procedure")?.value;
     const procedure = procedureId ? getProcedure(procedureId) : null;
@@ -1707,7 +1849,7 @@ document.addEventListener("click", async (event) => {
     openDirectoryModal({ "add-master": "master", "add-room": "room", "add-equipment": "equipment", "add-procedure": "procedure" }[action]);
   } else if (action === "add-procedure-stage") {
     syncProcedureDraft();
-    directoryDraftStages.push({ name: "", duration: 60, master: state.masters[0]?.name || "", room: state.rooms[0]?.name || "", equipment: state.equipment[0]?.name || "", gapAfter: 0 });
+    directoryDraftStages.push({ name: "", duration: 60, master: getBranchItems("masters")[0]?.name || "", room: getBranchItems("rooms")[0]?.name || "", equipment: getBranchItems("equipment")[0]?.name || "", gapAfter: 0 });
     const form = $("#directory-form");
     openDirectoryModal("procedure", form?.dataset.directoryId || "", true);
   } else if (action === "remove-procedure-stage") {
@@ -1750,6 +1892,11 @@ document.addEventListener("change", (event) => {
     const branchLabel = $("#login-master-branch");
     if (branchInput) branchInput.value = branchId;
     if (branchLabel) branchLabel.textContent = branch?.name || "Основна філія";
+  }
+  if (event.target.id === "schedule-date") {
+    state.selectedDate = event.target.value || getTodayIsoDate();
+    render();
+    return;
   }
   if (event.target.id === "master-filter") {
     state.filterMaster = event.target.value;
@@ -1866,7 +2013,7 @@ document.addEventListener("submit", async (event) => {
     const data = new FormData(form);
     let payload = {};
     if (entity === "master") {
-      const currentMaster = state.masters.find((item) => item.name === id);
+      const currentMaster = getBranchItems("masters").find((item) => item.name === id);
       let photo = currentMaster?.photo || "";
       const photoFile = data.get("photoFile");
       if (photoFile && photoFile.size) photo = await fileToPhotoData(photoFile);
@@ -1946,7 +2093,7 @@ document.addEventListener("submit", async (event) => {
     const slotId = event.target.dataset.availabilityId;
     const masterName = state.role === "master" ? getCurrentMasterName() : data.get("master");
     const slot = { id: slotId || `unavailable-${Date.now()}`, date: data.get("date"), master: masterName, start: data.get("start"), end: data.get("end"), reason: data.get("reason"), createdBy: state.role };
-    const master = state.masters.find((item) => item.name === slot.master);
+    const master = getBranchItems("masters").find((item) => item.name === slot.master);
     if (!master) {
       showToast("Оберіть майстра для цього інтервалу.");
       return;
@@ -1963,7 +2110,7 @@ document.addEventListener("submit", async (event) => {
       showToast(`Інтервал має бути в межах ${salonHours.start}—${salonHours.end}.`);
       return;
     }
-    const duplicate = state.unavailableSlots.some((item) => item.id !== slotId && item.date === slot.date && item.master === slot.master && timeOverlaps(slot.start, slot.end, item.start, item.end));
+    const duplicate = state.unavailableSlots.some((item) => (!item.branchId || item.branchId === state.branchId) && item.id !== slotId && item.date === slot.date && item.master === slot.master && timeOverlaps(slot.start, slot.end, item.start, item.end));
     if (duplicate) {
       showToast("Цей неробочий час уже перетинається з іншим інтервалом.");
       return;

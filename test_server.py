@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 import server
@@ -117,6 +118,72 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(server.ApiError) as context:
             server.delete_branch(self.connection, "branch-podil")
         self.assertEqual(context.exception.status, 409)
+
+    def test_directory_resources_are_scoped_to_the_current_branch(self):
+        branch = server.create_branch(self.connection, {"name": "Центр", "city": "Київ", "address": "вул. Хрещатик, 1"})
+        master = server.create_master(self.connection, {"name": "Майстриня Центру", "role": "Естетистка", "focus": "Догляд", "schedule": "10:00–18:00", "color": "sage", "email": "center-master@krasunya.local", "password": "secret1"}, branch["id"])
+        room = server.create_room(self.connection, {"name": "Центр · Каб. 1", "type": "Догляд", "status": "Вільний", "detail": "Лампа"}, branch["id"])
+        equipment = server.create_equipment(self.connection, {"name": "Центр · LED", "type": "LED-терапія", "room": room["name"], "status": "Готове"}, branch["id"])
+        procedure = server.create_procedure(self.connection, {"name": "Центр · Glow", "category": "Догляд", "price": 900, "resourcePlan": [{"name": "LED", "duration": 30, "master": master["name"], "room": room["name"], "equipment": equipment["name"]}]}, branch["id"])
+
+        center_state = server.filter_state_for_user(server.read_state(self.connection), {"branchId": branch["id"], "role": "admin"})
+        podil_state = server.filter_state_for_user(server.read_state(self.connection), {"branchId": "branch-podil", "role": "admin"})
+        self.assertEqual([item["name"] for item in center_state["masters"]], [master["name"]])
+        self.assertEqual([item["name"] for item in center_state["rooms"]], [room["name"]])
+        self.assertEqual([item["name"] for item in center_state["equipment"]], [equipment["name"]])
+        self.assertEqual([item["id"] for item in center_state["procedures"]], [procedure["id"]])
+        self.assertNotIn(master["name"], [item["name"] for item in podil_state["masters"]])
+        self.assertNotIn(room["name"], [item["name"] for item in podil_state["rooms"]])
+
+    def test_current_branch_can_be_deleted_after_records_are_removed(self):
+        branch = server.create_branch(self.connection, {"name": "Тимчасова", "city": "Київ", "address": "вул. Тестова, 1"})
+        token, user = server.login_user(self.connection, {"role": "admin", "userId": "admin-001", "password": server.DEMO_PASSWORD, "branchId": branch["id"]})
+        fallback = self.connection.execute("SELECT id FROM branches WHERE id != ? ORDER BY city, name LIMIT 1", (branch["id"],)).fetchone()["id"]
+        server.delete_branch(self.connection, branch["id"], branch["id"], "admin-001")
+        session = self.connection.execute("SELECT branch_id FROM sessions WHERE token = ?", (token,)).fetchone()
+        self.assertEqual(session["branch_id"], fallback)
+        self.assertIsNone(self.connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch["id"],)).fetchone())
+
+    def test_legacy_resource_tables_are_migrated_to_branch_scoped_keys(self):
+        legacy_path = Path(self.temp_dir.name) / "legacy.sqlite3"
+        legacy_connection = sqlite3.connect(legacy_path)
+        self.connection.backup(legacy_connection)
+        legacy_connection.execute("PRAGMA foreign_keys = OFF")
+        legacy_connection.executescript(
+            """
+            CREATE TABLE unavailable_slots_legacy AS SELECT id, date, master, start, "end", reason, created_by FROM unavailable_slots;
+            DROP TABLE unavailable_slots;
+            CREATE TABLE masters_legacy AS SELECT name, role, initials, color, schedule, focus, photo FROM masters;
+            DROP TABLE masters;
+            ALTER TABLE masters_legacy RENAME TO masters;
+            CREATE TABLE rooms_legacy AS SELECT name, type, status, detail FROM rooms;
+            DROP TABLE rooms;
+            ALTER TABLE rooms_legacy RENAME TO rooms;
+            CREATE TABLE equipment_legacy AS SELECT name, type, room, status FROM equipment;
+            DROP TABLE equipment;
+            ALTER TABLE equipment_legacy RENAME TO equipment;
+            ALTER TABLE unavailable_slots_legacy RENAME TO unavailable_slots;
+            """
+        )
+        legacy_connection.close()
+
+        original_db_path = server.DB_PATH
+        server.DB_PATH = legacy_path
+        try:
+            server.init_db()
+            migrated = server.connect()
+            try:
+                for table in ("masters", "rooms", "equipment"):
+                    primary = [row[1] for row in migrated.execute(f"PRAGMA table_info({table})") if row[5]]
+                    self.assertEqual(primary, ["name", "branch_id"])
+                self.assertEqual(migrated.execute("SELECT branch_id FROM unavailable_slots WHERE id = 'unavailable-001'").fetchone()[0], "branch-podil")
+                branch = server.create_branch(migrated, {"name": "Міграція", "city": "Київ", "address": "вул. Тестова, 2"})
+                duplicate_name = server.create_master(migrated, {"name": "Ірина Мельник", "role": "Косметологиня", "focus": "Догляд", "schedule": "10:00–19:00", "color": "lilac", "email": "migration-master@krasunya.local", "password": "secret1"}, branch["id"])
+                self.assertEqual(duplicate_name["branchId"], branch["id"])
+            finally:
+                migrated.close()
+        finally:
+            server.DB_PATH = original_db_path
 
     def test_uploaded_photo_is_validated_and_kept_as_data_url(self):
         photo = "data:image/jpeg;base64,ZmFrZQ=="

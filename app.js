@@ -2035,8 +2035,8 @@ document.addEventListener("submit", async (event) => {
       } else {
         const collection = { master: "masters", room: "rooms", equipment: "equipment", procedure: "procedures" }[entity];
         saved = entity === "procedure"
-          ? { ...payload, id: id || `procedure-${Date.now()}`, duration: `${payload.resourcePlan.reduce((total, stage) => total + Number(stage.duration || 0), 0)} хв`, stages: payload.resourcePlan.length, relation: `${new Set(payload.resourcePlan.map((stage) => stage.master)).size} майстри · ${new Set(payload.resourcePlan.map((stage) => stage.room)).size} кабінети` }
-          : { ...payload, ...(entity === "master" ? { initials: initials(String(payload.name)), color: payload.color || "peach" } : {}) };
+          ? { ...payload, branchId: state.branchId, id: id || `procedure-${Date.now()}`, duration: `${payload.resourcePlan.reduce((total, stage) => total + Number(stage.duration || 0), 0)} хв`, stages: payload.resourcePlan.length, relation: `${new Set(payload.resourcePlan.map((stage) => stage.master)).size} майстри · ${new Set(payload.resourcePlan.map((stage) => stage.room)).size} кабінети` }
+          : { ...payload, branchId: state.branchId, ...(entity === "master" ? { initials: initials(String(payload.name)), color: payload.color || "peach" } : {}) };
         const current = state[collection].find((item) => entity === "procedure" ? item.id === id : item.name === id);
         if (current) Object.assign(current, saved);
         else state[collection].push(saved);

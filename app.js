@@ -422,14 +422,14 @@ function getArchivedBranchItems(key) {
 function renderLoginScreen(errorMessage = "") {
   const users = demoUsers[authRoleDraft] || demoUsers.admin;
   const selectedUser = users[0];
-  const loginBranches = state.branches.filter((branch) => authRoleDraft === "admin" || !isBranchClosed(branch));
+  const loginBranches = state.branches.filter((branch) => !isBranchClosed(branch));
   const userOptions = users.map((user) => `<option value="${escapeHtml(user.id)}" data-branch-id="${escapeHtml(user.branchId || "branch-podil")}" ${user.id === selectedUser?.id ? "selected" : ""}>${escapeHtml(user.name)}</option>`).join("");
   const branchField = authRoleDraft === "master"
     ? `<div class="auth-field"><label>Філія майстра</label><div class="settings-detail" style="margin-top:0;padding:11px 12px;background:var(--cream);border-radius:10px;border:0"><span>Основна локація</span><strong id="login-master-branch">${escapeHtml(state.branches.find((branch) => branch.id === (selectedUser?.branchId || "branch-podil"))?.name || "Поділ")}</strong></div><input id="login-master-branch-id" type="hidden" name="branchId" value="${escapeHtml(selectedUser?.branchId || "branch-podil")}" /></div>`
     : `<div class="auth-field"><label for="login-branch">Філія для роботи</label><select id="login-branch" name="branchId" required>${loginBranches.map((branch) => `<option value="${escapeHtml(branch.id)}" ${branch.id === state.branchId ? "selected" : ""}>${escapeHtml(branch.name)} · ${escapeHtml(branch.city)}</option>`).join("")}</select></div>`;
   const roles = ["admin", "master", "client"];
   $("#auth-modal").innerHTML = `
-    <div class="auth-brand"><div class="auth-brand-mark">К</div><div class="auth-brand-copy"><strong>Красуня</strong><span>простір салону</span></div></div>
+    <div class="auth-brand"><img class="auth-brand-logo" src="assets/krasunya-logo-cropped.png" alt="Красуня" /></div>
     <h1 id="auth-title">Вхід у систему</h1>
     <p>Оберіть свою роль, щоб відкрити персональний робочий простір.</p>
     <div class="auth-role-tabs" role="tablist" aria-label="Тип користувача">

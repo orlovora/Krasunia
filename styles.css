@@ -607,6 +607,7 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
 .auth-backdrop[hidden] { display: none; }
 .auth-modal { width: min(520px, calc(100vw - 32px)); padding: 33px; color: var(--ink); background: var(--paper); border: 1px solid rgba(255,255,255,0.55); border-radius: 25px; box-shadow: 0 30px 100px rgba(35,19,33,0.38); animation: modal-in 240ms ease both; }
 .auth-brand { display: flex; align-items: center; gap: 12px; }
+.auth-brand-logo { display: block; width: 184px; height: auto; }
 .auth-brand-mark { display: grid; width: 42px; height: 42px; place-items: center; color: #fff8f3; background: var(--plum); border-radius: 13px 13px 13px 5px; font-family: var(--font-display); font-size: 22px; }
 .auth-brand-copy { display: flex; flex-direction: column; gap: 1px; }
 .auth-brand-copy strong { color: var(--plum); font-family: var(--font-display); font-size: 21px; font-weight: 600; letter-spacing: -0.06em; }

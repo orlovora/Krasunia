@@ -380,6 +380,17 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
 .table-row strong small, .table-row > span small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; font-weight: 400; }
 .table-row span { color: var(--muted); font-size: 10px; }
 .table-row button, .table-row { text-align: left; }
+.directory-data-row { cursor: default !important; }
+.directory-data-row:hover { background: #fffdfa; }
+.directory-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; }
+.directory-actions .icon-button { width: 27px; height: 27px; color: var(--muted); font-size: 13px; }
+.directory-actions .icon-button:hover { color: var(--plum); background: #eee5ed; }
+.directory-actions .directory-delete:hover { color: #a6603e; background: #f8e6dc; }
+.directory-inner-head { margin: 0; padding: 19px 20px 15px; }
+.directory-mini-row { min-width: 0; }
+.directory-mini-row .directory-actions { margin-left: auto; }
+.directory-master-row .directory-actions { margin-left: 0; }
+.directory-master-row .tag { margin-left: auto; }
 .client-table-person { display: inline-flex !important; align-items: center; gap: 8px; color: var(--ink-soft) !important; font-size: 11px !important; }
 .client-table-person .avatar { width: 25px; height: 25px; font-size: 8px; }
 .price-cell { color: var(--ink-soft) !important; font-weight: 700; }
@@ -597,6 +608,9 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
 .settings-form label { color: var(--ink-soft); font-size: 10px; font-weight: 700; }
 .settings-form input[readonly] { color: var(--muted); background: var(--cream); }
 .settings-form .modal-actions { margin-top: 20px; }
+.settings-divider { height: 1px; margin: 27px 0 22px; background: var(--line); }
+.settings-section-title { margin-top: 5px; color: var(--ink); font-family: var(--font-display); font-size: 20px; font-weight: 500; letter-spacing: -0.035em; }
+.settings-card > .settings-section-title + p { margin-top: 4px; }
 .settings-summary { display: flex; align-items: center; gap: 13px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .settings-summary .avatar { width: 50px; height: 50px; font-size: 14px; }
 .settings-summary-copy { display: flex; flex-direction: column; gap: 2px; }
@@ -609,6 +623,19 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
 .settings-detail strong { color: var(--ink-soft); font-size: 11px; text-align: right; }
 .settings-danger { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
 .settings-danger button { width: 100%; justify-content: center; }
+
+.directory-stage-editor { margin-top: 22px; padding: 17px; background: #f7f4ef; border: 1px solid rgba(57,39,55,0.08); border-radius: 13px; }
+.directory-stage-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.directory-stage-editor-head strong { color: var(--ink-soft); font-size: 12px; }
+.directory-stage-list { display: grid; gap: 13px; margin-top: 14px; }
+.directory-stage-row { padding: 13px; background: #fffdfa; border: 1px solid rgba(57,39,55,0.08); border-radius: 10px; }
+.directory-stage-heading { display: flex; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 11px; }
+.directory-stage-heading .builder-stage-number { flex: 0 0 auto; }
+.directory-stage-heading .directory-remove-stage { width: 25px; height: 25px; margin-left: auto; color: var(--coral-deep); font-size: 16px; }
+.directory-stage-fields { margin-top: 12px; gap: 11px; }
+.directory-add-stage { margin-top: 12px; }
+.directory-derived-value { display: flex; min-height: 40px; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 12px; color: var(--muted); background: var(--cream); border-radius: 9px; font-size: 10px; }
+.directory-derived-value strong { color: var(--ink-soft); font-size: 11px; }
 
 .toast-region { position: fixed; z-index: 40; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; }
 .toast { display: flex; align-items: center; gap: 9px; max-width: 340px; padding: 11px 13px; color: #fff8f3; background: var(--plum); border: 1px solid rgba(255,255,255,0.12); border-radius: 10px; box-shadow: 0 12px 30px rgba(40,24,39,0.22); animation: toast-in 240ms ease both; font-size: 11px; }

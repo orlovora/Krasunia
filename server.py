@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 try:
     import psycopg
@@ -311,7 +311,7 @@ def init_db() -> None:
               service TEXT NOT NULL,
               kind TEXT NOT NULL,
               start TEXT NOT NULL,
-              end TEXT NOT NULL,
+              "end" TEXT NOT NULL,
               price INTEGER NOT NULL,
               status TEXT NOT NULL,
               stages_json TEXT NOT NULL,
@@ -325,7 +325,7 @@ def init_db() -> None:
               branch_id TEXT NOT NULL DEFAULT 'branch-podil' REFERENCES branches(id),
               master TEXT NOT NULL REFERENCES masters(name),
               start TEXT NOT NULL,
-              end TEXT NOT NULL,
+              "end" TEXT NOT NULL,
               reason TEXT NOT NULL DEFAULT '',
               created_by TEXT NOT NULL
             );
@@ -385,10 +385,10 @@ def seed_db(connection: sqlite3.Connection) -> None:
     for procedure in SEED["procedures"]:
         connection.execute("INSERT INTO procedures VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (procedure["id"], procedure["name"], procedure["category"], procedure["duration"], procedure["price"], procedure["stages"], procedure["relation"], json.dumps(procedure["resourcePlan"], ensure_ascii=False)))
     for slot in SEED["unavailableSlots"]:
-        connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, end, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (slot["id"], slot["date"], "branch-podil", slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"]))
+        connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, \"end\", reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (slot["id"], slot["date"], "branch-podil", slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"]))
     timestamp = now_iso()
     for booking in SEED["bookings"]:
-        connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, end, price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], "branch-podil", booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
+        connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, \"end\", price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], "branch-podil", booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
 
 
 def row_client(row: sqlite3.Row) -> dict[str, Any]:
@@ -510,8 +510,18 @@ def branches_for(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     return [row_branch(row) for row in connection.execute("SELECT * FROM branches ORDER BY city, name")]
 
 
+def login_users_for(connection: sqlite3.Connection, role: str) -> list[dict[str, Any]]:
+    users = []
+    for row in connection.execute("SELECT id, name, email, role, master_name, branch_id FROM users WHERE role = ? ORDER BY name", (role,)):
+        item = dict(row)
+        item["masterName"] = item.pop("master_name")
+        item["branchId"] = item.pop("branch_id")
+        users.append(item)
+    return users
+
+
 def auth_session_payload(connection: sqlite3.Connection, user: sqlite3.Row | None, branch_id: str | None = None) -> dict[str, Any]:
-    payload: dict[str, Any] = {"authenticated": bool(user), "branches": branches_for(connection)}
+    payload: dict[str, Any] = {"authenticated": bool(user), "branches": branches_for(connection), "users": {role: login_users_for(connection, role) for role in ("admin", "master", "client")}}
     if user:
         payload["user"] = user_payload(user, branch_id)
     return payload
@@ -564,6 +574,298 @@ def update_profile(connection: sqlite3.Connection, user_id: str, payload: dict[s
         raise ApiError("Ім'я не може бути порожнім.", 422)
     connection.execute("UPDATE users SET name = ?, phone = ?, initials = ? WHERE id = ?", (name, phone, "".join(part[0] for part in name.split()[:2]).upper(), user_id))
     return dict(connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+
+
+def change_password(connection: sqlite3.Connection, user_id: str, current_token: str, payload: dict[str, Any]) -> None:
+    user = connection.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        raise ApiError("Користувача не знайдено.", 404)
+    current_password = str(payload.get("currentPassword") or "")
+    new_password = str(payload.get("newPassword") or "")
+    confirmation = str(payload.get("confirmPassword") or "")
+    if user["password_hash"] != password_hash(current_password):
+        raise ApiError("Поточний пароль введено неправильно.", 422)
+    if len(new_password) < 6:
+        raise ApiError("Новий пароль має містити щонайменше 6 символів.", 422)
+    if new_password != confirmation:
+        raise ApiError("Новий пароль і підтвердження не збігаються.", 422)
+    if new_password == current_password:
+        raise ApiError("Новий пароль має відрізнятися від поточного.", 422)
+    connection.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash(new_password), user_id))
+    connection.execute("DELETE FROM sessions WHERE user_id = ? AND token != ?", (user_id, current_token))
+
+
+def initials_for(name: str) -> str:
+    return "".join(part[0] for part in name.split()[:2]).upper()
+
+
+def parse_schedule(value: Any) -> tuple[str, str, str]:
+    schedule = str(value or "").strip().replace("-", "–")
+    parts = [part.strip() for part in schedule.split("–")]
+    if len(parts) != 2:
+        raise ApiError("Графік має бути у форматі 09:00–19:00.", 422)
+    start, end = parts
+    parse_minutes(start)
+    parse_minutes(end)
+    if parse_minutes(start) >= parse_minutes(end):
+        raise ApiError("Завершення графіка має бути пізніше початку.", 422)
+    return start, end, f"{start}–{end}"
+
+
+def directory_error(message: str, status: int = 422) -> ApiError:
+    return ApiError(message, status)
+
+
+def create_master(connection: sqlite3.Connection, payload: dict[str, Any], branch_id: str) -> dict[str, Any]:
+    name = str(payload.get("name") or "").strip()
+    role = str(payload.get("role") or "Майстер").strip()
+    focus = str(payload.get("focus") or "").strip()
+    photo = str(payload.get("photo") or "").strip()
+    color = str(payload.get("color") or "peach").strip()
+    email = str(payload.get("email") or "").strip().lower()
+    phone = str(payload.get("phone") or "").strip()
+    password = str(payload.get("password") or "")
+    if not name or not role or not focus or not email:
+        raise directory_error("Заповніть ім’я, спеціалізацію, фокус, email і пароль майстра.")
+    if len(password) < 6:
+        raise directory_error("Пароль майстра має містити щонайменше 6 символів.")
+    if connection.execute("SELECT 1 FROM masters WHERE name = ?", (name,)).fetchone():
+        raise directory_error("Майстер із таким ім’ям уже існує.", 409)
+    if connection.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+        raise directory_error("Користувач із таким email уже існує.", 409)
+    _, _, schedule = parse_schedule(payload.get("schedule"))
+    if color not in {"peach", "lilac", "sage"}:
+        color = "peach"
+    master = {"name": name, "role": role, "initials": initials_for(name), "color": color, "schedule": schedule, "focus": focus, "photo": photo}
+    connection.execute("INSERT INTO masters VALUES (?, ?, ?, ?, ?, ?, ?)", tuple(master[key] for key in ("name", "role", "initials", "color", "schedule", "focus", "photo")))
+    user_id = f"master-{uuid.uuid4().hex[:12]}"
+    connection.execute(
+        "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (user_id, name, email, phone, "master", name, "", branch_id, master["initials"], password_hash(password)),
+    )
+    return master
+
+
+def update_master(connection: sqlite3.Connection, master_name: str, payload: dict[str, Any], branch_id: str = "branch-podil") -> dict[str, Any]:
+    current = connection.execute("SELECT * FROM masters WHERE name = ?", (master_name,)).fetchone()
+    if not current:
+        raise ApiError("Майстра не знайдено.", 404)
+    name = str(payload.get("name") or master_name).strip()
+    if name != master_name:
+        raise directory_error("Ім’я майстра не можна змінювати після створення, бо воно використовується в записах.")
+    role = str(payload.get("role") or current["role"]).strip()
+    focus = str(payload.get("focus") or current["focus"]).strip()
+    photo = str(payload.get("photo") if payload.get("photo") is not None else current["photo"]).strip()
+    color = str(payload.get("color") or current["color"]).strip()
+    _, _, schedule = parse_schedule(payload.get("schedule") or current["schedule"])
+    if not role or not focus:
+        raise directory_error("Спеціалізація та фокус майстра не можуть бути порожніми.")
+    if color not in {"peach", "lilac", "sage"}:
+        color = current["color"]
+    connection.execute("UPDATE masters SET role=?, color=?, schedule=?, focus=?, photo=? WHERE name=?", (role, color, schedule, focus, photo, master_name))
+    user = connection.execute("SELECT * FROM users WHERE master_name = ?", (master_name,)).fetchone()
+    email = str(payload.get("email") or (user["email"] if user else "")).strip().lower()
+    phone = str(payload.get("phone") or (user["phone"] if user else "")).strip()
+    password = str(payload.get("password") or "")
+    if email and (not user or email != user["email"]):
+        duplicate = connection.execute("SELECT 1 FROM users WHERE email = ? AND id != ?", (email, user["id"] if user else "")).fetchone()
+        if duplicate:
+            raise directory_error("Користувач із таким email уже існує.", 409)
+    if user:
+        if not email:
+            raise directory_error("Email майстра не може бути порожнім.")
+        if password and len(password) < 6:
+            raise directory_error("Пароль майстра має містити щонайменше 6 символів.")
+        if password:
+            connection.execute("UPDATE users SET name=?, email=?, phone=?, initials=?, password_hash=? WHERE id=?", (name, email, phone, initials_for(name), password_hash(password), user["id"]))
+        else:
+            connection.execute("UPDATE users SET name=?, email=?, phone=?, initials=? WHERE id=?", (name, email, phone, initials_for(name), user["id"]))
+    elif email:
+        if len(password) < 6:
+            raise directory_error("Для створення облікового запису майстра додайте пароль не менше 6 символів.")
+        connection.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (f"master-{uuid.uuid4().hex[:12]}", name, email, phone, "master", name, "", branch_id, initials_for(name), password_hash(password)))
+    return dict(connection.execute("SELECT * FROM masters WHERE name = ?", (master_name,)).fetchone())
+
+
+def master_is_referenced(connection: sqlite3.Connection, master_name: str) -> bool:
+    if connection.execute("SELECT 1 FROM unavailable_slots WHERE master = ? LIMIT 1", (master_name,)).fetchone():
+        return True
+    for row in connection.execute("SELECT stages_json FROM bookings"):
+        if any(stage.get("master") == master_name for stage in json.loads(row["stages_json"])):
+            return True
+    for row in connection.execute("SELECT resource_plan_json FROM procedures"):
+        if any(stage.get("master") == master_name for stage in json.loads(row["resource_plan_json"])):
+            return True
+    return False
+
+
+def delete_master(connection: sqlite3.Connection, master_name: str) -> None:
+    if not connection.execute("SELECT 1 FROM masters WHERE name = ?", (master_name,)).fetchone():
+        raise ApiError("Майстра не знайдено.", 404)
+    if master_is_referenced(connection, master_name):
+        raise ApiError("Майстер використовується в записах, процедурах або неробочому часі. Спочатку приберіть ці зв’язки.", 409)
+    connection.execute("DELETE FROM users WHERE master_name = ?", (master_name,))
+    connection.execute("DELETE FROM masters WHERE name = ?", (master_name,))
+
+
+def validate_room(payload: dict[str, Any], current: sqlite3.Row | None = None) -> dict[str, str]:
+    name = str(payload.get("name") or (current["name"] if current else "")).strip()
+    room_type = str(payload.get("type") or (current["type"] if current else "")).strip()
+    status = str(payload.get("status") or (current["status"] if current else "Вільний")).strip()
+    detail = str(payload.get("detail") if payload.get("detail") is not None else (current["detail"] if current else "")).strip()
+    if not name or not room_type:
+        raise directory_error("Заповніть назву та призначення кабінету.")
+    return {"name": name, "type": room_type, "status": status, "detail": detail}
+
+
+def create_room(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, str]:
+    room = validate_room(payload)
+    if connection.execute("SELECT 1 FROM rooms WHERE name = ?", (room["name"],)).fetchone():
+        raise directory_error("Кабінет із такою назвою вже існує.", 409)
+    connection.execute("INSERT INTO rooms VALUES (?, ?, ?, ?)", tuple(room[key] for key in ("name", "type", "status", "detail")))
+    return room
+
+
+def update_room(connection: sqlite3.Connection, room_name: str, payload: dict[str, Any]) -> dict[str, str]:
+    current = connection.execute("SELECT * FROM rooms WHERE name = ?", (room_name,)).fetchone()
+    if not current:
+        raise ApiError("Кабінет не знайдено.", 404)
+    room = validate_room({**payload, "name": room_name}, current)
+    connection.execute("UPDATE rooms SET type=?, status=?, detail=? WHERE name=?", (room["type"], room["status"], room["detail"], room_name))
+    return room
+
+
+def delete_room(connection: sqlite3.Connection, room_name: str) -> None:
+    if not connection.execute("SELECT 1 FROM rooms WHERE name = ?", (room_name,)).fetchone():
+        raise ApiError("Кабінет не знайдено.", 404)
+    if connection.execute("SELECT 1 FROM equipment WHERE room = ? LIMIT 1", (room_name,)).fetchone():
+        raise ApiError("Кабінет має обладнання. Спочатку перенесіть або видаліть його.", 409)
+    for row in connection.execute("SELECT stages_json FROM bookings"):
+        if any(stage.get("room") == room_name for stage in json.loads(row["stages_json"])):
+            raise ApiError("Кабінет використовується в історії записів і не може бути видалений.", 409)
+    for row in connection.execute("SELECT resource_plan_json FROM procedures"):
+        if any(stage.get("room") == room_name for stage in json.loads(row["resource_plan_json"])):
+            raise ApiError("Кабінет використовується в процедурах. Спочатку змініть їх маршрути.", 409)
+    connection.execute("DELETE FROM rooms WHERE name = ?", (room_name,))
+
+
+def validate_equipment(connection: sqlite3.Connection, payload: dict[str, Any], current: sqlite3.Row | None = None) -> dict[str, str]:
+    name = str(payload.get("name") or (current["name"] if current else "")).strip()
+    equipment_type = str(payload.get("type") or (current["type"] if current else "")).strip()
+    room = str(payload.get("room") or (current["room"] if current else "")).strip()
+    status = str(payload.get("status") or (current["status"] if current else "Готове")).strip()
+    if not name or not equipment_type or not room:
+        raise directory_error("Заповніть назву, тип і кабінет обладнання.")
+    if not connection.execute("SELECT 1 FROM rooms WHERE name = ?", (room,)).fetchone():
+        raise ApiError("Кабінет для обладнання не знайдено.", 404)
+    return {"name": name, "type": equipment_type, "room": room, "status": status}
+
+
+def create_equipment(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, str]:
+    equipment = validate_equipment(connection, payload)
+    if connection.execute("SELECT 1 FROM equipment WHERE name = ?", (equipment["name"],)).fetchone():
+        raise directory_error("Обладнання з такою назвою вже існує.", 409)
+    connection.execute("INSERT INTO equipment VALUES (?, ?, ?, ?)", tuple(equipment[key] for key in ("name", "type", "room", "status")))
+    return equipment
+
+
+def update_equipment(connection: sqlite3.Connection, equipment_name: str, payload: dict[str, Any]) -> dict[str, str]:
+    current = connection.execute("SELECT * FROM equipment WHERE name = ?", (equipment_name,)).fetchone()
+    if not current:
+        raise ApiError("Обладнання не знайдено.", 404)
+    equipment = validate_equipment(connection, {**payload, "name": equipment_name}, current)
+    connection.execute("UPDATE equipment SET type=?, room=?, status=? WHERE name=?", (equipment["type"], equipment["room"], equipment["status"], equipment_name))
+    return equipment
+
+
+def delete_equipment(connection: sqlite3.Connection, equipment_name: str) -> None:
+    if not connection.execute("SELECT 1 FROM equipment WHERE name = ?", (equipment_name,)).fetchone():
+        raise ApiError("Обладнання не знайдено.", 404)
+    for row in connection.execute("SELECT stages_json FROM bookings"):
+        if any(stage.get("equipment") == equipment_name for stage in json.loads(row["stages_json"])):
+            raise ApiError("Обладнання використовується в історії записів і не може бути видалене.", 409)
+    for row in connection.execute("SELECT resource_plan_json FROM procedures"):
+        if any(stage.get("equipment") == equipment_name for stage in json.loads(row["resource_plan_json"])):
+            raise ApiError("Обладнання використовується в процедурах. Спочатку змініть їх маршрути.", 409)
+    connection.execute("DELETE FROM equipment WHERE name = ?", (equipment_name,))
+
+
+def duration_label(minutes: int) -> str:
+    return f"{minutes // 60} год {minutes % 60:02d} хв"
+
+
+def validate_procedure(connection: sqlite3.Connection, payload: dict[str, Any], current: sqlite3.Row | None = None) -> dict[str, Any]:
+    name = str(payload.get("name") or (current["name"] if current else "")).strip()
+    category = str(payload.get("category") or (current["category"] if current else "")).strip()
+    try:
+        price = int(payload.get("price") if payload.get("price") is not None else (current["price"] if current else 0))
+    except (TypeError, ValueError) as error:
+        raise directory_error("Вартість процедури має бути числом.") from error
+    resource_plan = payload.get("resourcePlan")
+    if resource_plan is None and current:
+        resource_plan = json.loads(current["resource_plan_json"])
+    if not name or not category or price < 0 or not isinstance(resource_plan, list) or not resource_plan:
+        raise directory_error("Заповніть назву, категорію, невід’ємну вартість і хоча б один етап.")
+    details: list[str] = []
+    total_duration = 0
+    for index, stage in enumerate(resource_plan):
+        if not isinstance(stage, dict):
+            details.append(f"Етап {index + 1} має бути об’єктом.")
+            continue
+        required = ("name", "duration", "master", "room", "equipment")
+        for field in required:
+            if not stage.get(field):
+                details.append(f"В етапі {index + 1} відсутнє поле «{field}».")
+        try:
+            stage_duration = int(stage.get("duration", 0))
+            gap_after = int(stage.get("gapAfter", 0) or 0)
+            if stage_duration <= 0:
+                details.append(f"Тривалість етапу {index + 1} має бути більшою за 0.")
+            if gap_after < 0:
+                details.append(f"Пауза після етапу {index + 1} не може бути від’ємною.")
+            total_duration += stage_duration + (gap_after if index < len(resource_plan) - 1 else 0)
+        except (TypeError, ValueError):
+            details.append(f"Тривалість етапу {index + 1} має бути числом.")
+        if stage.get("master") and not connection.execute("SELECT 1 FROM masters WHERE name = ?", (stage["master"],)).fetchone():
+            details.append(f"Майстра «{stage['master']}» не знайдено.")
+        if stage.get("room") and not connection.execute("SELECT 1 FROM rooms WHERE name = ?", (stage["room"],)).fetchone():
+            details.append(f"Кабінет «{stage['room']}» не знайдено.")
+        if stage.get("equipment") and not connection.execute("SELECT 1 FROM equipment WHERE name = ?", (stage["equipment"],)).fetchone():
+            details.append(f"Обладнання «{stage['equipment']}» не знайдено.")
+    if details:
+        raise ApiError("Процедура не пройшла перевірку.", 422, sorted(set(details)))
+    masters = {stage["master"] for stage in resource_plan}
+    rooms = {stage["room"] for stage in resource_plan}
+    master_word = "майстер" if len(masters) == 1 else "майстри"
+    room_word = "кабінет" if len(rooms) == 1 else "кабінети"
+    return {"name": name, "category": category, "duration": duration_label(total_duration), "price": price, "stages": len(resource_plan), "relation": f"{len(masters)} {master_word} · {len(rooms)} {room_word}", "resourcePlan": resource_plan}
+
+
+def create_procedure(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
+    procedure = validate_procedure(connection, payload)
+    if connection.execute("SELECT 1 FROM procedures WHERE name = ?", (procedure["name"],)).fetchone():
+        raise directory_error("Процедура з такою назвою вже існує.", 409)
+    procedure["id"] = f"procedure-{uuid.uuid4().hex[:12]}"
+    connection.execute("INSERT INTO procedures VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (procedure["id"], procedure["name"], procedure["category"], procedure["duration"], procedure["price"], procedure["stages"], procedure["relation"], json.dumps(procedure["resourcePlan"], ensure_ascii=False)))
+    return procedure
+
+
+def update_procedure(connection: sqlite3.Connection, procedure_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    current = connection.execute("SELECT * FROM procedures WHERE id = ?", (procedure_id,)).fetchone()
+    if not current:
+        raise ApiError("Процедуру не знайдено.", 404)
+    procedure = validate_procedure(connection, payload, current)
+    if connection.execute("SELECT 1 FROM procedures WHERE name = ? AND id != ?", (procedure["name"], procedure_id)).fetchone():
+        raise directory_error("Процедура з такою назвою вже існує.", 409)
+    connection.execute("UPDATE procedures SET name=?, category=?, duration=?, price=?, stages=?, relation=?, resource_plan_json=? WHERE id=?", (procedure["name"], procedure["category"], procedure["duration"], procedure["price"], procedure["stages"], procedure["relation"], json.dumps(procedure["resourcePlan"], ensure_ascii=False), procedure_id))
+    procedure["id"] = procedure_id
+    return procedure
+
+
+def delete_procedure(connection: sqlite3.Connection, procedure_id: str) -> None:
+    if not connection.execute("SELECT 1 FROM procedures WHERE id = ?", (procedure_id,)).fetchone():
+        raise ApiError("Процедуру не знайдено.", 404)
+    connection.execute("DELETE FROM procedures WHERE id = ?", (procedure_id,))
 
 
 def resources_conflict(first: dict[str, Any], second: dict[str, Any]) -> str | None:
@@ -660,7 +962,7 @@ def create_booking(connection: sqlite3.Connection, payload: dict[str, Any]) -> d
     try:
         booking = validate_booking(connection, payload)
         timestamp = now_iso()
-        connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, end, price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
+        connection.execute("INSERT INTO bookings (id, date, branch_id, client_id, client, phone, service, kind, start, \"end\", price, status, stages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (booking["id"], booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), timestamp, timestamp))
         update_client_masters(connection, booking)
         connection.commit()
         return booking
@@ -685,7 +987,7 @@ def update_booking(connection: sqlite3.Connection, booking_id: str, payload: dic
         current_data = row_booking(current)
         merged = {**current_data, **payload, "id": booking_id}
         booking = validate_booking(connection, merged, excluded_id=booking_id)
-        connection.execute("UPDATE bookings SET date=?, branch_id=?, client_id=?, client=?, phone=?, service=?, kind=?, start=?, end=?, price=?, status=?, stages_json=?, updated_at=? WHERE id=?", (booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), now_iso(), booking_id))
+        connection.execute("UPDATE bookings SET date=?, branch_id=?, client_id=?, client=?, phone=?, service=?, kind=?, start=?, \"end\"=?, price=?, status=?, stages_json=?, updated_at=? WHERE id=?", (booking["date"], booking["branchId"], booking["clientId"], booking["client"], booking["phone"], booking["service"], booking["kind"], booking["start"], booking["end"], booking["price"], booking["status"], json.dumps(booking["stages"], ensure_ascii=False), now_iso(), booking_id))
         update_client_masters(connection, booking)
         connection.commit()
         return booking
@@ -725,7 +1027,7 @@ def create_slot(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict
     begin_write(connection)
     try:
         slot = validate_slot(connection, payload)
-        connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, end, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tuple(slot[key] for key in ("id", "date", "branchId", "master", "start", "end", "reason", "createdBy")))
+        connection.execute("INSERT INTO unavailable_slots (id, date, branch_id, master, start, \"end\", reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", tuple(slot[key] for key in ("id", "date", "branchId", "master", "start", "end", "reason", "createdBy")))
         connection.commit()
         return slot
     except Exception:
@@ -741,7 +1043,7 @@ def update_slot(connection: sqlite3.Connection, slot_id: str, payload: dict[str,
             raise ApiError("Неробочий інтервал не знайдено.", 404)
         merged = {**row_slot(current), **payload, "id": slot_id}
         slot = validate_slot(connection, merged, excluded_id=slot_id)
-        connection.execute("UPDATE unavailable_slots SET date=?, branch_id=?, master=?, start=?, end=?, reason=?, created_by=? WHERE id=?", (slot["date"], slot["branchId"], slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"], slot_id))
+        connection.execute("UPDATE unavailable_slots SET date=?, branch_id=?, master=?, start=?, \"end\"=?, reason=?, created_by=? WHERE id=?", (slot["date"], slot["branchId"], slot["master"], slot["start"], slot["end"], slot["reason"], slot["createdBy"], slot_id))
         connection.commit()
         return slot
     except Exception:
@@ -858,13 +1160,32 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         try:
             parts = parsed.path.strip("/").split("/")
-            if parts[:2] != ["api", "availability"] or len(parts) != 3:
+            if len(parts) != 3 or parts[0] != "api" or parts[1] not in {"availability", "masters", "rooms", "equipment", "procedures"}:
                 raise ApiError("Маршрут API не знайдено.", 404)
             _, _, user_data = require_user(self)
-            if user_data["role"] == "client":
+            if parts[1] == "availability" and user_data["role"] == "client":
                 raise ApiError("Клієнт не може змінювати неробочий час.", 403)
+            if parts[1] != "availability" and user_data["role"] != "admin":
+                raise ApiError("Тільки адміністратор може керувати довідниками.", 403)
             with connect() as connection:
-                delete_slot(connection, parts[2])
+                if parts[1] == "availability":
+                    delete_slot(connection, unquote(parts[2]))
+                else:
+                    begin_write(connection)
+                    try:
+                        resource_id = unquote(parts[2])
+                        if parts[1] == "masters":
+                            delete_master(connection, resource_id)
+                        elif parts[1] == "rooms":
+                            delete_room(connection, resource_id)
+                        elif parts[1] == "equipment":
+                            delete_equipment(connection, resource_id)
+                        else:
+                            delete_procedure(connection, resource_id)
+                        connection.commit()
+                    except Exception:
+                        connection.rollback()
+                        raise
             self.send_json(200, {"ok": True})
         except Exception as error:
             self.handle_api_error(error)
@@ -897,11 +1218,55 @@ class Handler(SimpleHTTPRequestHandler):
                     update_profile(connection, user["id"], payload)
                     refreshed = connection.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
                     self.send_json(200, {"user": user_payload(refreshed, session_branch(token, refreshed["branch_id"]))})
+                elif parts == ["api", "auth", "password"] and method == "POST":
+                    user, token, _ = require_user(self)
+                    change_password(connection, user["id"], token, payload)
+                    self.send_json(200, {"ok": True})
                 elif parts == ["api", "branches"] and method == "POST":
                     _, _, user_data = require_user(self)
                     if user_data["role"] != "admin":
                         raise ApiError("Тільки адміністратор може створювати філії.", 403)
                     self.send_json(201, {"branch": create_branch(connection, payload)})
+                elif parts == ["api", "masters"] and method == "POST":
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може керувати майстрами.", 403)
+                    self.send_json(201, {"master": create_master(connection, payload, user_data["branchId"])})
+                elif len(parts) == 3 and parts[:2] == ["api", "masters"] and method in ("PATCH", "PUT"):
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може керувати майстрами.", 403)
+                    self.send_json(200, {"master": update_master(connection, unquote(parts[2]), payload, user_data["branchId"])})
+                elif parts == ["api", "rooms"] and method == "POST":
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може керувати кабінетами.", 403)
+                    self.send_json(201, {"room": create_room(connection, payload)})
+                elif len(parts) == 3 and parts[:2] == ["api", "rooms"] and method in ("PATCH", "PUT"):
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може керувати кабінетами.", 403)
+                    self.send_json(200, {"room": update_room(connection, unquote(parts[2]), payload)})
+                elif parts == ["api", "equipment"] and method == "POST":
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може керувати обладнанням.", 403)
+                    self.send_json(201, {"equipment": create_equipment(connection, payload)})
+                elif len(parts) == 3 and parts[:2] == ["api", "equipment"] and method in ("PATCH", "PUT"):
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може керувати обладнанням.", 403)
+                    self.send_json(200, {"equipment": update_equipment(connection, unquote(parts[2]), payload)})
+                elif parts == ["api", "procedures"] and method == "POST":
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може керувати процедурами.", 403)
+                    self.send_json(201, {"procedure": create_procedure(connection, payload)})
+                elif len(parts) == 3 and parts[:2] == ["api", "procedures"] and method in ("PATCH", "PUT"):
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може керувати процедурами.", 403)
+                    self.send_json(200, {"procedure": update_procedure(connection, unquote(parts[2]), payload)})
                 elif parts == ["api", "bookings"] and method == "POST":
                     _, _, user_data = require_user(self)
                     if user_data["role"] == "client":

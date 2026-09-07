@@ -81,6 +81,31 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(branch["city"], "Київ")
         self.assertIsNotNone(self.connection.execute("SELECT 1 FROM branches WHERE id = ?", (branch["id"],)).fetchone())
 
+    def test_admin_can_create_master_with_login(self):
+        master = server.create_master(self.connection, {"name": "Нова Майстриня", "role": "Естетистка", "focus": "Догляд", "schedule": "10:00–18:00", "color": "sage", "email": "new-master@krasunya.local", "phone": "+38 067 000 00 09", "password": "secret1"}, "branch-podil")
+        self.assertEqual(master["name"], "Нова Майстриня")
+        token, user = server.login_user(self.connection, {"role": "master", "userId": self.connection.execute("SELECT id FROM users WHERE email = ?", ("new-master@krasunya.local",)).fetchone()[0], "password": "secret1", "branchId": "branch-podil"})
+        self.assertTrue(token)
+        self.assertEqual(user["masterName"], "Нова Майстриня")
+
+    def test_master_cannot_be_deleted_while_referenced(self):
+        with self.assertRaises(server.ApiError) as context:
+            server.delete_master(self.connection, "Ірина Мельник")
+        self.assertEqual(context.exception.status, 409)
+
+    def test_directory_crud_and_password_change(self):
+        room = server.create_room(self.connection, {"name": "Каб. Тест", "type": "Тестова зона", "status": "Вільний", "detail": "Лампа"})
+        equipment = server.create_equipment(self.connection, {"name": "Обладнання Тест", "type": "Діагностика", "room": room["name"], "status": "Готове"})
+        procedure = server.create_procedure(self.connection, {"name": "Процедура Тест", "category": "Тести", "price": 500, "resourcePlan": [{"name": "Етап тест", "duration": 30, "master": "Ірина Мельник", "room": room["name"], "equipment": equipment["name"]}]})
+        self.assertEqual(procedure["duration"], "0 год 30 хв")
+        server.update_procedure(self.connection, procedure["id"], {"name": "Процедура Тест 2", "category": "Тести", "price": 600, "resourcePlan": procedure["resourcePlan"]})
+        server.delete_procedure(self.connection, procedure["id"])
+        server.delete_equipment(self.connection, equipment["name"])
+        server.delete_room(self.connection, room["name"])
+        token, user = server.login_user(self.connection, {"role": "admin", "userId": "admin-001", "password": server.DEMO_PASSWORD, "branchId": "branch-podil"})
+        server.change_password(self.connection, user["id"], token, {"currentPassword": server.DEMO_PASSWORD, "newPassword": "new-demo", "confirmPassword": "new-demo"})
+        server.login_user(self.connection, {"role": "admin", "userId": "admin-001", "password": "new-demo", "branchId": "branch-podil"})
+
 
 if __name__ == "__main__":
     unittest.main()

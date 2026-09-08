@@ -234,6 +234,7 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
 .stat-value { display: block; margin-top: 9px; color: var(--ink); font-family: var(--font-display); font-size: 27px; line-height: 1; }
 .stat-note { display: block; position: relative; z-index: 1; margin-top: 8px; color: var(--muted); font-size: 10px; }
 .up { color: var(--sage-deep); font-weight: 700; }
+.down { color: var(--coral-deep); font-weight: 700; }
 
 .app-view { display: grid; grid-template-columns: minmax(0, 1fr) 318px; gap: 20px; align-items: start; }
 .panel { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }

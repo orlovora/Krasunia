@@ -346,6 +346,65 @@ function startOfWeek(isoDate) {
   return toIsoDate(date);
 }
 
+function bookingsInDateRange(bookings, fromIso, toIso) {
+  return bookings.filter((booking) => booking.date >= fromIso && booking.date <= toIso);
+}
+
+function bookingWorkMinutes(booking) {
+  const stages = Array.isArray(booking.stages) ? booking.stages : [];
+  if (stages.length) {
+    return stages.reduce((total, stage) => total + Math.max(0, parseMinutes(stage.end) - parseMinutes(stage.start)), 0);
+  }
+  return Math.max(0, parseMinutes(booking.end) - parseMinutes(booking.start));
+}
+
+function branchCapacityMinutes(dayCount) {
+  const minutesPerDay = getBranchItems("masters").reduce((total, master) => {
+    const [start, end] = String(master.schedule || "").split("–");
+    if (!start || !end) return total;
+    return total + Math.max(0, parseMinutes(end) - parseMinutes(start));
+  }, 0);
+  return minutesPerDay * dayCount;
+}
+
+function utilizationPercent(bookings, dayCount) {
+  const capacity = branchCapacityMinutes(dayCount);
+  if (!capacity) return 0;
+  const busyMinutes = bookings.reduce((total, booking) => total + bookingWorkMinutes(booking), 0);
+  return Math.min(100, Math.round((busyMinutes / capacity) * 100));
+}
+
+function adminUtilization(activeBookings) {
+  const currentWeekStart = startOfWeek(state.selectedDate);
+  const previousWeekStart = addDays(currentWeekStart, -7);
+  const currentWeekBookings = bookingsInDateRange(activeBookings, currentWeekStart, addDays(currentWeekStart, 6));
+  const previousWeekBookings = bookingsInDateRange(activeBookings, previousWeekStart, addDays(previousWeekStart, 6));
+  const current = utilizationPercent(currentWeekBookings, 7);
+
+  if (!previousWeekBookings.length) {
+    return { value: `${current}%`, note: "немає записів за минулий тиждень" };
+  }
+
+  const previous = utilizationPercent(previousWeekBookings, 7);
+  const delta = current - previous;
+  return {
+    value: `${current}%`,
+    note: delta === 0 ? "без змін до минулого тижня" : `${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}% до минулого тижня`,
+    trend: delta > 0,
+    trendDown: delta < 0,
+  };
+}
+
+function newClientsInRange(activeBookings, fromIso, toIso) {
+  const firstBookingByClient = new Map();
+  activeBookings.forEach((booking) => {
+    const clientId = booking.clientId || booking.client;
+    const firstBooking = firstBookingByClient.get(clientId);
+    if (!firstBooking || booking.date < firstBooking) firstBookingByClient.set(clientId, booking.date);
+  });
+  return [...firstBookingByClient.values()].filter((date) => date >= fromIso && date <= toIso).length;
+}
+
 function getBranchItems(key) {
   return (state[key] || []).filter((item) => isInCurrentBranch(item) && !item.archived);
 }
@@ -1017,6 +1076,11 @@ function renderStats() {
   const activeBookings = state.bookings.filter((booking) => (!booking.branchId || booking.branchId === state.branchId) && !booking.archived && isActiveBooking(booking));
   const activeBookingsToday = activeBookings.filter((booking) => booking.date === state.selectedDate);
   const total = activeBookingsToday.reduce((sum, booking) => sum + booking.price, 0);
+  const utilization = adminUtilization(activeBookings);
+  const recentBookingsStart = addDays(state.selectedDate, -6);
+  const newClients = newClientsInRange(activeBookings, recentBookingsStart, state.selectedDate);
+  const complexBookingsToday = activeBookingsToday.filter((booking) => booking.kind === "complex" || booking.stages.length > 1).length;
+  const todayNote = complexBookingsToday ? `${complexBookingsToday} складні сеанси` : activeBookingsToday.length ? "усі записи прості" : "немає записів";
   const stats = state.role === "client" ? [
     { icon: "◷", label: "Найближчий запис", value: "04.09", note: "сьогодні · 09:30" },
     { icon: "↻", label: "Усього візитів", value: "8", note: "за весь час" },
@@ -1028,16 +1092,16 @@ function renderStats() {
     { icon: "₴", label: "Ваш оборот", value: "7 650 ₴", note: "за поточними записами" },
     { icon: "♧", label: "Клієнтів сьогодні", value: "2", note: "1 новий клієнт" }
   ] : [
-    { icon: "◷", label: "Записи сьогодні", value: String(activeBookingsToday.length), note: "2 складні сеанси" },
-    { icon: "◒", label: "Завантаження студії", value: "74%", note: "↑ 8% до минулої п’ятниці", trend: true },
+    { icon: "◷", label: "Записи сьогодні", value: String(activeBookingsToday.length), note: todayNote },
+    { icon: "◒", label: "Завантаження студії", value: utilization.value, note: utilization.note, trend: utilization.trend, trendDown: utilization.trendDown },
     { icon: "₴", label: "Очікувана виручка", value: formatMoney(total), note: `із ${activeBookingsToday.length} записів` },
-    { icon: "✦", label: "Нові клієнти", value: "3", note: "за останні 7 днів" }
+    { icon: "✦", label: "Нові клієнти", value: String(newClients), note: "за останні 7 днів" }
   ];
   $("#stats-grid").innerHTML = stats.map((stat) => `
     <article class="stat-card">
       <div class="stat-topline"><span>${escapeHtml(stat.label)}</span><span class="stat-icon" aria-hidden="true">${stat.icon}</span></div>
       <strong class="stat-value">${escapeHtml(stat.value)}</strong>
-      <span class="stat-note ${stat.trend ? "up" : ""}">${escapeHtml(stat.note)}</span>
+      <span class="stat-note ${stat.trend ? "up" : ""} ${stat.trendDown ? "down" : ""}">${escapeHtml(stat.note)}</span>
     </article>
   `).join("");
 }

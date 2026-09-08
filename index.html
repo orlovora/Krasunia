@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#2e1c2d" />
     <title>Красуня — розумний запис салону</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260908-mobile" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Перейти до основного вмісту</a>
     <div class="app-shell">
       <aside class="sidebar" aria-label="Основна навігація">
+        <button class="mobile-sidebar-close" data-action="toggle-mobile-menu" type="button" aria-label="Закрити меню">×</button>
         <div class="brand-lockup">
           <div class="brand-logo-frame"><img src="assets/krasunya-logo-cropped.png" alt="Красуня" /></div>
           <div class="brand-caption">простір салону</div>
@@ -69,6 +70,8 @@
 
       <main class="main-area" id="main-content">
         <header class="topbar">
+          <button class="mobile-menu-toggle" data-action="toggle-mobile-menu" type="button" aria-label="Відкрити меню" aria-controls="mobile-navigation">☰</button>
+          <div class="mobile-topbar-brand"><img src="assets/krasunya-logo-cropped.png" alt="Красуня" /><span id="mobile-section-label">Розклад</span></div>
           <div class="breadcrumb"><span>Красуня</span><span class="breadcrumb-slash">/</span><strong id="breadcrumb-current">Розклад</strong></div>
           <div class="topbar-actions">
             <label class="search-box">
@@ -100,6 +103,15 @@
         </div>
       </main>
     </div>
+
+    <div class="mobile-menu-scrim" data-action="toggle-mobile-menu" aria-hidden="true"></div>
+    <nav class="mobile-bottom-nav" id="mobile-navigation" aria-label="Мобільна навігація">
+      <button class="mobile-nav-item active" data-section="schedule" type="button"><span aria-hidden="true">▦</span><small>Розклад</small></button>
+      <button class="mobile-nav-item" data-section="clients" type="button"><span aria-hidden="true">♧</span><small>Клієнти</small></button>
+      <button class="mobile-nav-item" data-section="history" type="button"><span aria-hidden="true">↻</span><small>Історія</small></button>
+      <button class="mobile-nav-item" data-section="team" type="button"><span aria-hidden="true">◌</span><small>Команда</small></button>
+      <button class="mobile-nav-item" data-action="toggle-mobile-menu" type="button"><span aria-hidden="true">•••</span><small>Ще</small></button>
+    </nav>
 
     <div class="modal-backdrop" id="modal-backdrop" hidden>
       <div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"></div>

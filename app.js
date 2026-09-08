@@ -1052,7 +1052,9 @@ function updateChrome() {
     master: { title: "Сьогодні у вас 2 сеанси", subtitle: `${firstName}, розклад готовий. Історія клієнта доступна в один клік.` },
     client: { title: `Вітаємо, ${firstName}`, subtitle: "Ваш наступний запис зібрано й підтверджено. Усі деталі — нижче." }
   }[state.role];
+  document.body.classList.toggle("client-mode", state.role === "client");
   $("#breadcrumb-current").textContent = current;
+  $("#mobile-section-label").textContent = current === "Налаштування профілю" ? "Профіль" : current;
   $("#page-title").innerHTML = `${roleData.title} <span class="wave">✳</span>`;
   $("#page-subtitle").textContent = roleData.subtitle;
   $("#new-booking-button").style.display = state.role === "client" || isBranchClosed() ? "none" : "inline-flex";
@@ -1066,8 +1068,8 @@ function updateChrome() {
   $("#account-role").textContent = roleLabel(state.role);
   $("#account-avatar").textContent = state.user?.initials || "К";
   $(".nav-count").textContent = state.role === "client" ? "" : String(getVisibleClients().length);
-  $$(".nav-item").forEach((item) => item.classList.toggle("active", state.role !== "client" && item.dataset.section === state.section));
-  $$(".nav-item").forEach((item) => {
+  $$(`[data-section]`).forEach((item) => item.classList.toggle("active", state.role !== "client" && item.dataset.section === state.section));
+  $$(`[data-section]`).forEach((item) => {
     item.style.opacity = state.role === "master" && ["procedures", "resources"].includes(item.dataset.section) ? "0.4" : "1";
   });
 }
@@ -1870,6 +1872,7 @@ function showToast(message) {
 function handleSection(section) {
   if (!state.authenticated) return;
   if (state.role === "client" && !["client", "settings"].includes(section)) return;
+  document.body.classList.remove("mobile-menu-open");
   state.section = section;
   render();
 }
@@ -1923,6 +1926,11 @@ document.addEventListener("click", async (event) => {
   const sectionLink = event.target.closest("[data-section-link]");
   if (sectionLink) {
     handleSection(sectionLink.dataset.sectionLink);
+    return;
+  }
+  const action = event.target.closest("[data-action]")?.dataset.action;
+  if (action === "toggle-mobile-menu") {
+    document.body.classList.toggle("mobile-menu-open");
     return;
   }
   const directoryEditButton = event.target.closest("[data-directory-edit]");
@@ -2020,7 +2028,6 @@ document.addEventListener("click", async (event) => {
     render();
     return;
   }
-  const action = event.target.closest("[data-action]")?.dataset.action;
   if (action === "open-branch-switcher") {
     openBranchSwitcher();
   } else if (action === "open-settings") {

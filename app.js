@@ -921,7 +921,7 @@ function renderProcedureTimeline(date, candidate, clientId) {
     return `<div class="procedure-timeline-row ${familiarMaster ? "familiar" : ""} ${stageIndex === 0 ? "procedure-group-start" : ""}"><div class="procedure-timeline-resource"><div class="procedure-resource-head">${procedureLabel}${removeButton}</div><strong>${stageIndex + 1}. ${escapeHtml(resourceStage.name)}</strong><span>${escapeHtml(resourceStage.master)} · ${escapeHtml(resourceStage.room)}</span><small>${escapeHtml(resourceStage.equipment)}</small>${familiarMaster ? `<span class="procedure-master-badge">Знайомий майстер</span>` : ""}<em class="procedure-status ${statusClass}"><span class="legend-dot"></span>${status}</em></div><div class="procedure-timeline-track" aria-label="${escapeHtml(`${procedure.name}, ${resourceStage.name}: ${status}`)}">${bookedBlocks}${unavailableBlocks}${pendingBlock}${!bookedBlocks && !unavailableBlocks && !pendingBlock ? `<span class="procedure-free-label">Вільно весь день</span>` : ""}</div></div>`;
   })).join("");
   const totalStages = selectedProcedures.reduce((sum, procedure) => sum + procedure.resourcePlan.length, 0);
-  container.innerHTML = `<div class="procedure-timeline-head"><div><div class="panel-kicker">Доступність процедур</div><strong id="procedure-timeline-title">${bookingDraftProcedures.length === 1 ? escapeHtml(selectedProcedures[0].name) : `${bookingDraftProcedures.length} процедури в маршруті`} · ${escapeHtml(formatLongDate(date))}</strong><p>Порожні ділянки на шкалі — доступні вікна. Кожну додану процедуру можна рухати окремо, а зайнятість враховує майстра, кабінет і обладнання.</p></div><div class="procedure-timeline-legend"><span class="legend-dot legend-dot-booked"></span>Зайнято<span class="legend-dot legend-dot-unavailable"></span>Неробочий час<span class="legend-dot legend-dot-pending"></span>Новий запис<span class="procedure-drag-hint" id="procedure-drag-hint">↔ Перетягніть «Новий»</span></div></div><div class="procedure-timeline-summary"><span><strong>${bookingDraftProcedures.length}</strong> ${bookingDraftProcedures.length === 1 ? "процедура" : "процедури"}</span><span><strong>${totalStages}</strong> ${totalStages === 1 ? "етап" : "етапи"} маршруту</span><span><strong>${procedureMasters.length}</strong> ${procedureMasters.length === 1 ? "майстер" : "майстри"}</span><span class="summary-free"><span class="legend-dot"></span>доступно між записами</span></div><div class="procedure-timeline-scroll"><div class="procedure-timeline-grid"><div class="procedure-timeline-axis"><span>Процедура, етап і ресурси</span><div class="procedure-time-axis">${timeLabels.map((time) => `<span>${time}</span>`).join("")}</div></div>${stageRows}</div></div>`;
+  container.innerHTML = `<div class="procedure-timeline-head"><div><div class="panel-kicker">Доступність процедур</div><strong id="procedure-timeline-title">${bookingDraftProcedures.length === 1 ? escapeHtml(selectedProcedures[0].name) : `${bookingDraftProcedures.length} процедури в маршруті`} · ${escapeHtml(formatLongDate(date))}</strong><p>Порожні ділянки на шкалі — доступні вікна. Кожну додану процедуру можна рухати окремо, а зайнятість враховує майстра, кабінет і обладнання.</p></div><div class="procedure-timeline-legend"><span class="legend-dot legend-dot-booked"></span>Зайнято<span class="legend-dot legend-dot-unavailable"></span>Неробочий час<span class="legend-dot legend-dot-pending"></span>Новий запис<span class="procedure-drag-hint" id="procedure-drag-hint">↔ Перетягніть «Новий»</span></div></div><div class="procedure-timeline-summary"><span><strong>${bookingDraftProcedures.length}</strong> ${bookingDraftProcedures.length === 1 ? "процедура" : "процедури"}</span><span><strong>${totalStages}</strong> ${totalStages === 1 ? "етап" : "етапи"} маршруту</span><span><strong>${procedureMasters.length}</strong> ${procedureMasters.length === 1 ? "майстер" : "майстри"}</span><span class="summary-free"><span class="legend-dot"></span>доступно між записами</span></div><div class="timeline-scroll-hint" role="note"><span class="timeline-scroll-hint-icon" aria-hidden="true">↔</span><span>Проведіть по шкалі вліво або вправо, щоб побачити весь день</span><span class="timeline-scroll-hint-arrow" aria-hidden="true">→</span></div><div class="procedure-timeline-scroll"><div class="procedure-timeline-grid"><div class="procedure-timeline-axis"><span>Процедура, етап і ресурси</span><div class="procedure-time-axis">${timeLabels.map((time) => `<span>${time}</span>`).join("")}</div></div>${stageRows}</div></div>`;
 }
 
 function resetTimelineDragStyles(drag) {
@@ -1114,6 +1114,13 @@ function renderSchedule() {
     : state.view === "week" ? "Розклад на тиждень"
       : state.view === "month" ? `Розклад · ${formatMonthTitle(state.selectedDate)}`
         : `Розклад · ${formatYearTitle(state.selectedDate)}`;
+  const mobileViewHint = state.view === "day"
+    ? "Проведіть по розкладу вліво, щоб побачити всіх майстрів"
+    : state.view === "week"
+      ? "Проведіть по тижню вліво або вправо, щоб побачити всі дні"
+      : state.view === "month"
+        ? "Проведіть по календарю вліво або вправо, щоб побачити всі дні"
+        : "Оберіть потрібний день у календарі року";
   return `
     <section class="panel calendar-panel" aria-labelledby="schedule-title">
       <div class="panel-head">
@@ -1137,6 +1144,7 @@ function renderSchedule() {
           </div>
         </div>
       </div>
+      <div class="mobile-calendar-hint" role="note"><span class="mobile-calendar-hint-icon" aria-hidden="true">↔</span><span>${mobileViewHint}</span></div>
       ${state.view === "day" ? renderDayView() : state.view === "week" ? renderWeekView() : state.view === "month" ? renderMonthView() : renderYearView()}
     </section>
     <aside class="right-rail" aria-label="Фокус дня">

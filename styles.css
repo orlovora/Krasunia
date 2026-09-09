@@ -444,6 +444,14 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
 .access-note { display: flex; grid-column: 1 / -1; align-items: center; gap: 9px; margin-bottom: 14px; padding: 10px 12px; color: var(--ink-soft); background: #f5e8df; border: 1px solid rgba(236,138,97,0.16); border-radius: 10px; font-size: 10px; }
 .access-note span { display: grid; width: 20px; height: 20px; flex: 0 0 auto; place-items: center; color: var(--coral-deep); background: rgba(236,138,97,0.13); border-radius: 50%; font-size: 11px; font-weight: 700; }
 .access-note p { margin: 0; }
+.client-form-intro { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 20px; padding: 13px 14px; color: var(--ink-soft); background: #f5e8df; border: 1px solid rgba(236,138,97,0.14); border-radius: 12px; }
+.client-form-mark { display: grid; width: 27px; height: 27px; flex: 0 0 auto; place-items: center; color: #fff8f3; background: var(--coral-deep); border-radius: 9px; font-size: 18px; line-height: 1; }
+.client-form-intro strong { display: block; font-size: 11px; }
+.client-form-intro p { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.optional-label { color: var(--muted); font-size: 9px; font-weight: 400; }
+.client-form-footnote { display: flex; align-items: flex-start; gap: 8px; margin-top: 17px; padding: 10px 11px; color: var(--muted); background: var(--cream); border-radius: 9px; font-size: 10px; }
+.client-form-footnote > span { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; color: var(--coral-deep); border: 1px solid rgba(185,109,77,0.35); border-radius: 50%; font-size: 10px; font-weight: 700; }
+.client-form-footnote p { margin: 0; line-height: 1.45; }
 .empty-directory { padding: 24px 20px; color: var(--muted); font-size: 11px; }
 .mini-list { display: flex; flex-direction: column; gap: 12px; }
 .mini-list-item { display: flex; align-items: center; gap: 10px; }

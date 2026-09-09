@@ -939,6 +939,32 @@ def directory_error(message: str, status: int = 422) -> ApiError:
     return ApiError(message, status)
 
 
+def create_client(connection: sqlite3.Connection, payload: dict[str, Any], branch_id: str) -> dict[str, Any]:
+    ensure_branch_open(connection, branch_id)
+    name = str(payload.get("name") or "").strip()
+    phone = str(payload.get("phone") or "").strip()
+    note = str(payload.get("note") or "").strip()
+    if not name or not phone:
+        raise directory_error("Заповніть ім’я та номер телефону клієнта.")
+    if connection.execute("SELECT 1 FROM clients WHERE phone = ? LIMIT 1", (phone,)).fetchone():
+        raise directory_error("Клієнт із таким номером телефону вже існує.", 409)
+    client = {
+        "id": f"client-{uuid.uuid4().hex[:12]}",
+        "name": name,
+        "phone": phone,
+        "initials": initials_for(name),
+        "visits": 0,
+        "total": 0,
+        "note": note,
+        "masterNames": []
+    }
+    connection.execute(
+        "INSERT INTO clients (id, name, phone, initials, visits, total, note, master_names_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (client["id"], client["name"], client["phone"], client["initials"], client["visits"], client["total"], client["note"], json.dumps(client["masterNames"], ensure_ascii=False)),
+    )
+    return client
+
+
 def validate_photo(value: Any) -> str:
     photo = str(value or "").strip()
     if not photo:
@@ -1678,6 +1704,11 @@ class Handler(SimpleHTTPRequestHandler):
                     if user_data["role"] != "admin":
                         raise ApiError("Тільки адміністратор може додавати адміністраторів.", 403)
                     self.send_json(201, {"admin": create_admin(connection, payload, user_data["branchId"])})
+                elif parts == ["api", "clients"] and method == "POST":
+                    _, _, user_data = require_user(self)
+                    if user_data["role"] != "admin":
+                        raise ApiError("Тільки адміністратор може додавати клієнтів.", 403)
+                    self.send_json(201, {"client": create_client(connection, payload, user_data["branchId"])})
                 elif parts == ["api", "masters"] and method == "POST":
                     _, _, user_data = require_user(self)
                     if user_data["role"] != "admin":

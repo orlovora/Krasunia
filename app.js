@@ -1363,6 +1363,12 @@ function openAdminModal() {
   showModal();
 }
 
+function openClientModal() {
+  if (state.role !== "admin" || isBranchClosed()) return;
+  $("#modal").innerHTML = `<div class="modal-head"><div><div class="panel-kicker">Картка клієнта</div><h2 id="modal-title">Новий клієнт</h2><p>Збережіть контактні дані — історія візитів і сума догляду з’являться після першого запису.</p></div><button class="close-modal" data-close-modal type="button" aria-label="Закрити">×</button></div><form class="modal-form client-form" id="client-form"><div class="client-form-intro"><div class="client-form-mark" aria-hidden="true">＋</div><div><strong>Додайте клієнта до довідника</strong><p>Ім’я та телефон допоможуть швидко знайти його під час створення запису.</p></div></div><div class="form-grid"><div class="form-field"><label for="client-name">Ім’я та прізвище</label><input id="client-name" name="name" placeholder="Наприклад, Марія Бондар" autocomplete="name" required /></div><div class="form-field"><label for="client-phone">Номер телефону</label><input id="client-phone" name="phone" type="tel" placeholder="+38 067 000 00 00" autocomplete="tel" required /></div><div class="form-field full"><label for="client-note">Нотатка команди <span class="optional-label">необов’язково</span></label><textarea id="client-note" name="note" placeholder="Наприклад: чутлива шкіра, зручні ранкові візити"></textarea><small>Цю нотатку бачитиме команда салону у картці клієнта.</small></div></div><div class="client-form-footnote"><span>i</span><p>Новий клієнт з’явиться у списку без візитів і зможе бути обраний під час створення запису.</p></div><div class="modal-actions"><button class="ghost-button" data-close-modal type="button">Скасувати</button><button class="primary-button" type="submit"><span>＋</span> Додати клієнта</button></div></form>`;
+  showModal();
+}
+
 async function deleteAdmin(adminId) {
   if (state.role !== "admin") return;
   const admin = (demoUsers.admin || []).find((item) => item.id === adminId);
@@ -1524,7 +1530,8 @@ function renderDirectory(section) {
   const action = section === "team"
     ? `${state.role === "admin" && branchOpen ? `<button class="ghost-button" data-action="add-master" type="button"><span>＋</span> Додати майстра</button><button class="ghost-button" data-action="add-admin" type="button"><span>＋</span> Додати адміністратора</button>` : ""}${branchOpen ? `<button class="primary-button" data-action="add-availability" type="button"><span>＋</span> Неробочий час</button>` : ""}`
       : section === "resources" ? (state.role === "admin" && branchOpen ? `<button class="primary-button" data-action="add-room" type="button"><span>＋</span> Додати кабінет</button>` : "")
-        : ["procedures"].includes(section) && state.role !== "admin" ? "" : state.role === "admin" && branchOpen ? `<button class="primary-button" data-action="add-${section === "procedures" ? "procedure" : section}" type="button"><span>＋</span> Додати</button>` : "";
+        : section === "clients" ? (state.role === "admin" && branchOpen ? `<button class="primary-button" data-action="add-client" type="button"><span>＋</span> Додати клієнта</button>` : "")
+          : ["procedures"].includes(section) && state.role !== "admin" ? "" : state.role === "admin" && branchOpen ? `<button class="primary-button" data-action="add-${section === "procedures" ? "procedure" : section}" type="button"><span>＋</span> Додати</button>` : "";
   return `<section class="directory-view"><div class="management-head"><div><div class="panel-kicker">Довідник студії</div><h2 class="panel-title">${titles[0]}</h2><p class="panel-subtitle">${titles[1]}</p></div>${action}</div>${section === "procedures" ? renderProcedures() : section === "resources" ? renderResources() : section === "team" ? renderTeam() : section === "clients" ? renderClients() : renderHistory()}</section>`;
 }
 
@@ -2070,6 +2077,8 @@ document.addEventListener("click", async (event) => {
     openAvailabilityModal();
   } else if (action === "add-admin") {
     openAdminModal();
+  } else if (action === "add-client") {
+    openClientModal();
   } else if (["add-master", "add-room", "add-equipment", "add-procedure"].includes(action)) {
     openDirectoryModal({ "add-master": "master", "add-room": "room", "add-equipment": "equipment", "add-procedure": "procedure" }[action]);
   } else if (action === "add-procedure-stage") {
@@ -2166,6 +2175,32 @@ document.addEventListener("submit", async (event) => {
       showToast(`Адміністратора «${admin.name}» додано.`);
     } catch (error) {
       showToast(`Не вдалося додати адміністратора: ${apiErrorMessage(error)}`);
+    }
+    return;
+  }
+  if (event.target.id === "client-form") {
+    event.preventDefault();
+    if (state.role !== "admin" || isBranchClosed()) return;
+    const data = new FormData(event.target);
+    const payload = {
+      name: String(data.get("name") || "").trim(),
+      phone: String(data.get("phone") || "").trim(),
+      note: String(data.get("note") || "").trim()
+    };
+    try {
+      let client = { ...payload, id: `client-${Date.now()}`, initials: initials(payload.name).toUpperCase(), visits: 0, total: 0, masterNames: [] };
+      if (apiReady) {
+        const response = await apiRequest("/clients", { method: "POST", body: JSON.stringify(payload) });
+        client = response.client;
+        await reloadBootstrap();
+      } else {
+        state.clients.push(client);
+      }
+      closeModal();
+      render();
+      showToast(`Клієнта «${client.name}» додано.`);
+    } catch (error) {
+      showToast(`Не вдалося додати клієнта: ${apiErrorMessage(error)}`);
     }
     return;
   }

@@ -1115,12 +1115,13 @@ function renderSchedule() {
       : state.view === "month" ? `Розклад · ${formatMonthTitle(state.selectedDate)}`
         : `Розклад · ${formatYearTitle(state.selectedDate)}`;
   const mobileViewHint = state.view === "day"
-    ? "Проведіть по розкладу вліво, щоб побачити всіх майстрів"
+    ? "Прокрутіть вниз, щоб переглянути розклад кожного майстра"
     : state.view === "week"
       ? "Проведіть по тижню вліво або вправо, щоб побачити всі дні"
       : state.view === "month"
         ? "Проведіть по календарю вліво або вправо, щоб побачити всі дні"
         : "Оберіть потрібний день у календарі року";
+  const mobileViewHintIcon = state.view === "day" ? "↕" : "↔";
   return `
     <section class="panel calendar-panel" aria-labelledby="schedule-title">
       <div class="panel-head">
@@ -1144,7 +1145,7 @@ function renderSchedule() {
           </div>
         </div>
       </div>
-      <div class="mobile-calendar-hint" role="note"><span class="mobile-calendar-hint-icon" aria-hidden="true">↔</span><span>${mobileViewHint}</span></div>
+      <div class="mobile-calendar-hint" role="note"><span class="mobile-calendar-hint-icon" aria-hidden="true">${mobileViewHintIcon}</span><span>${mobileViewHint}</span></div>
       ${state.view === "day" ? renderDayView() : state.view === "week" ? renderWeekView() : state.view === "month" ? renderMonthView() : renderYearView()}
     </section>
     <aside class="right-rail" aria-label="Фокус дня">
@@ -1177,7 +1178,7 @@ function renderDayView() {
       ${!isBranchClosed() ? `<button class="ghost-button availability-button" data-action="add-availability" type="button"><span>＋</span> Неробочий час</button>` : ""}
       <span class="availability-note">Конфлікти ресурсів перевіряються автоматично</span>
     </div>
-    <div class="timeline-wrap">
+    <div class="timeline-wrap desktop-day-schedule">
       <div class="timeline-header schedule-grid" style="--master-count:${scheduleMasters.length}">
         <div class="schedule-corner"><span>ЧАС</span><strong>Майстри</strong></div>
         ${scheduleMasters.map((master) => renderMasterColumnHeader(master)).join("")}
@@ -1187,6 +1188,9 @@ function renderDayView() {
         ${scheduleMasters.map((master) => renderMasterColumn(master, visible)).join("")}
         ${showNowLine ? `<div class="schedule-now-line" style="top:${nowTop}px"><span class="now-line-label">зараз</span></div>` : ""}
       </div>
+    </div>
+    <div class="mobile-day-schedule" aria-label="Розклад майстрів на сьогодні">
+      ${scheduleMasters.map((master) => `<section class="mobile-master-schedule" aria-label="Розклад майстра ${escapeHtml(master.name)}"><div class="mobile-master-heading">${renderMasterColumnHeader(master)}</div><div class="mobile-master-timeline"><div class="time-labels">${timeLabels.map((time) => `<div class="time-label">${time}</div>`).join("")}<div class="time-label time-label-end">${escapeHtml(salonHours.end)}</div></div>${renderMasterColumn(master, visible)}</div></section>`).join("")}
     </div>
   `;
 }

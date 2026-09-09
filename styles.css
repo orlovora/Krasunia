@@ -1263,3 +1263,53 @@ h1 { color: var(--ink); font-family: var(--font-display); font-size: clamp(32px,
   .calendar-panel .view-toggle button { font-size: 9px; }
   .mobile-calendar-hint { margin-right: 13px; margin-left: 13px; }
 }
+
+/* On phones the dashboard must use the viewport width; the schedule itself becomes a vertical list. */
+.mobile-day-schedule { display: none; }
+
+@media (max-width: 767px) {
+  .app-view {
+    align-items: stretch;
+    width: 100%;
+  }
+  .calendar-panel,
+  .right-rail {
+    width: 100%;
+    min-width: 0;
+  }
+  .right-rail { align-items: stretch; }
+  .right-rail > .focus-card,
+  .right-rail > .side-panel { width: 100%; }
+
+  .desktop-day-schedule { display: none; }
+  .mobile-day-schedule {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 4px;
+  }
+  .mobile-master-schedule {
+    overflow: hidden;
+    background: var(--paper);
+    border-top: 1px solid var(--line);
+  }
+  .mobile-master-heading { padding: 12px 16px 8px; }
+  .mobile-master-heading .master-header {
+    width: 100%;
+    min-height: 57px;
+  }
+  .mobile-master-timeline {
+    --hour-height: 64px;
+    --schedule-height: 640px;
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 6px;
+    padding: 0 16px 16px;
+  }
+  .mobile-master-timeline .master-track {
+    width: 100%;
+    min-width: 0;
+  }
+  .mobile-master-timeline .time-label { font-size: 9px; }
+  .mobile-master-timeline .time-label-end { bottom: -4px; }
+}

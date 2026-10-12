@@ -1654,7 +1654,7 @@ function buildDraftCandidate(routeStart) {
   };
 }
 
-function conflictsFor(candidate, date, excludedBookingId = "") {
+function conflictsFor(candidate, date, excludedBookingId = "", clientId = "") {
   const conflicts = [];
   candidate.stages.forEach((stage, stageIndex) => {
     candidate.stages.slice(stageIndex + 1).forEach((otherStage) => {
@@ -1685,6 +1685,7 @@ function conflictsFor(candidate, date, excludedBookingId = "") {
         const timeOverlap = parseMinutes(newStage.start) < parseMinutes(oldStage.end) && parseMinutes(newStage.end) > parseMinutes(oldStage.start);
         const sharedResource = ["master", "room", "equipment"].find((key) => newStage[key] === oldStage[key]);
         if (timeOverlap && sharedResource) conflicts.push(`${newStage.name}: ${oldStage[sharedResource]} зайнятий у ${oldStage.start}—${oldStage.end}`);
+        if (timeOverlap && clientId && booking.clientId === clientId) conflicts.push(`${booking.client} уже має запис ${oldStage.start}—${oldStage.end}`);
       });
     });
   });
@@ -1725,7 +1726,7 @@ function syncReschedulePreview() {
   const candidate = buildRescheduledBooking(booking, date, start);
   $("#reschedule-total").textContent = `${candidate.start}—${candidate.end}`;
   $("#reschedule-stage-list").innerHTML = candidate.stages.map((stage, index) => `<div class="builder-stage"><span class="builder-stage-number">0${index + 1}</span><span class="builder-stage-copy"><strong>${escapeHtml(stage.name)}</strong><span class="stage-master-line">${renderMasterAvatar(stage.master, "master-avatar-xs")} ${escapeHtml(stage.master)} · ${escapeHtml(stage.room)}</span></span><span class="builder-stage-time">${escapeHtml(stage.start)}—${escapeHtml(stage.end)}</span></div>`).join("");
-  const conflicts = conflictsFor(candidate, date, booking.id);
+  const conflicts = conflictsFor(candidate, date, booking.id, booking.clientId);
   const check = $("#reschedule-check");
   const submit = $("#submit-reschedule");
   if (conflicts.length) {
@@ -1796,7 +1797,7 @@ function syncBookingBuilder() {
   } else {
     $("#builder-total").textContent = "Додайте процедуру";
   }
-  const conflicts = candidate ? conflictsFor(candidate, date) : [];
+  const conflicts = candidate ? conflictsFor(candidate, date, "", clientId) : [];
   const requiresNewMasterConfirmation = getDraftNewProcedureMasters(clientId).length > 0;
   const check = $("#booking-check");
   const submit = $("#submit-booking");
@@ -2323,7 +2324,7 @@ document.addEventListener("submit", async (event) => {
     if (!booking || state.role === "client" || (state.role === "master" && !bookingBelongsToCurrentMaster(booking))) return;
     const data = new FormData(event.target);
     const candidate = buildRescheduledBooking(booking, data.get("date"), data.get("start"));
-    const conflicts = conflictsFor(candidate, candidate.date, booking.id);
+    const conflicts = conflictsFor(candidate, candidate.date, booking.id, booking.clientId);
     if (conflicts.length) {
       showToast(`Не вдалося перенести: ${conflicts[0]}.`);
       return;
@@ -2417,7 +2418,7 @@ document.addEventListener("submit", async (event) => {
     return;
   }
   const candidate = buildDraftCandidate(data.get("start"));
-  const conflicts = conflictsFor(candidate, data.get("date"));
+  const conflicts = conflictsFor(candidate, data.get("date"), "", data.get("client"));
   if (conflicts.length) {
     showToast("Не вдалося зберегти: знайдено конфлікт ресурсу.");
     return;

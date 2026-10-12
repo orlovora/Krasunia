@@ -1354,6 +1354,8 @@ def validate_booking(connection: sqlite3.Connection, payload: dict[str, Any], ex
                 conflict = resources_conflict(new_stage, old_stage)
                 if conflict:
                     conflicts.append(conflict)
+                if existing["clientId"] == client_row["id"] and overlaps(new_stage["start"], new_stage["end"], old_stage["start"], old_stage["end"]):
+                    conflicts.append(f"Клієнт {client_row['name']} уже має запис {old_stage['start']}—{old_stage['end']}.")
     if conflicts:
         raise ApiError("Запис конфліктує з уже зарезервованим ресурсом.", 409, sorted(set(conflicts)))
 

@@ -42,6 +42,15 @@ class BackendTests(unittest.TestCase):
             server.create_booking(self.connection, payload)
         self.assertEqual(context.exception.status, 409)
 
+    def test_same_client_cannot_have_overlapping_bookings(self):
+        server.create_booking(self.connection, self.payload())
+        other = self.payload(master="Анна Левченко", room="Каб. 1", equipment="Pressotherapy P-02")
+        other["id"] = "test-booking-2"
+        with self.assertRaises(server.ApiError) as context:
+            server.create_booking(self.connection, other)
+        self.assertEqual(context.exception.status, 409)
+        self.assertTrue(any("уже має запис" in item for item in context.exception.details))
+
     def test_unavailable_master_time_is_rejected(self):
         payload = self.payload(date="2026-09-04", start="12:00", end="12:30", master="Ірина Мельник", room="Каб. 3", equipment="Luma Pro")
         with self.assertRaises(server.ApiError) as context:
